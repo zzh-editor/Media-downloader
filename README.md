@@ -50,12 +50,6 @@ Agent 检测站点类型
       ├── ArtStation ─────────────────→ gallery-dl 下载
       │
       ├── Bilibili / b23.tv ─────────→ yt-dlp（--impersonate chrome + cookies）
-      │                                      │
-      │                                      ▼
-       │                              列出格式
-      │                                      │
-      │                                      ▼
-      │                              若 >1080p → 问清晰度选择
       │
       ├── YouTube ───────────────────→ yt-dlp（cookies + 清晰度选择）
       │
@@ -66,7 +60,7 @@ Agent 检测站点类型
                                            ▼
                                    检查 URL 是否含时间范围
                                            │
-                                      ├── 含时间 → --download-sections 切片
+                                      ├── 含时间 → 切片下载（需 ffmpeg）
                                       │
                                       └── 无时间 → 完整下载
 ```
@@ -75,98 +69,87 @@ Agent 检测站点类型
 
 | 功能 | 说明 |
 |------|------|
-| YouTube 下载 | 清晰度选择（1080p / 4K / 8K）、时间切片、cookies 处理年龄限制 |
-| Bilibili 下载 | 大会员/高画质解锁、AV1/HEVC/AVC 格式策略 |
-| Vimeo 下载 | 公开视频无需特殊处理，cookies 支持未登录可下载 |
-| ArtStation 下载 | gallery-dl 专用，按用户名/项目名自动组织文件结构 |
-| 时间切片 | `URL HH:MM-SS` 语法，支持多区间叠加，依赖 ffmpeg |
+| 视频下载 | YouTube / Bilibili / Vimeo 等主流视频站，自动选择最佳清晰度 |
+| 视频时间切片 | `URL 10:30-15:00` 语法，支持多区间叠加，依赖 ffmpeg |
+| 图片下载 | ArtStation 等图库站，支持画师主页与单个项目 |
 | 清晰度选择 | 自动探测格式列表，≥1080p 时询问用户偏好 |
 | Cookies 获取 | 支持标准浏览器 + 非标准 Chromium（Dia/Brave/Edge 等） |
 
-## YouTube 下载
+## 下载方式
 
-### 基础下载
+所有下载任务只用一句话描述需求 + 链接，Agent 自动处理后续。
 
-```bash
-yt-dlp --cookies-from-browser chrome -P "下载目录" -o "%(title)s.%(ext)s" "URL"
+### 视频下载
+
+```
+用户：下载这个视频 https://youtu.be/xxx
+Agent：检测到 YouTube 视频
+       运行格式探测 → 最大 1080p → 自动下载 1080p
 ```
 
-### 清晰度选择
+```
+用户：下载这个视频 https://youtu.be/xxx
+Agent：检测到 YouTube 视频
+       运行格式探测 → 发现 4K / 2160p 选项
+       询问：可选清晰度 1080p / 2160p / 4320p
+       用户选择 2160p → 下载 4K
+```
 
-Agent 自动运行 `yt-dlp -F "URL"` 列出格式，筛选 ≥1080p 的选项供用户选择：
+```
+用户：下载B站这个视频 https://www.bilibili.com/video/BV1JqT56fEGS
+Agent：检测到 Bilibili 视频 → 检查 Cookies
+       运行格式探测 → 从可用编码中选择 AVC（兼容性最好）
+       若该视频需要大会员/登录 → 提示登录后重试
+       下载 1080p AVC
+```
 
-| 选择 | 参数 |
+```
+用户：帮我下这个视频 https://vimeo.com/xxx
+Agent：检测到 Vimeo 视频 → 公开内容无需 Cookies
+       运行格式探测 → 下载最佳清晰度
+```
+
+> Bilibili 需要额外参数 `--impersonate chrome` + `--add-header Origin/Referer` 模拟浏览器指纹。大会员内容需要登录态 Cookies。
+
+> 清晰度选择逻辑：Agent 先运行 `yt-dlp -F "URL"` 列出格式，筛选 ≥1080p 的选项；若最大高度 ≤1080p 则自动下载，不做询问。
+
+### 视频时间切片下载
+
+```
+用户：把这个下了 https://youtu.be/xxx 1:30-5:00
+Agent：检测到时间切片需求 → 检查 ffmpeg
+       下载 1:30 到 5:00 的视频片段
+```
+
+```
+用户：下B站这个 https://www.bilibili.com/video/BVxxx 10:30-15:00
+Agent：检测到 Bilibili → 时间切片需求 → 检查 ffmpeg
+       下载 10:30 到 15:00 的片段
+```
+
+时间范围紧跟在 URL 后面，空格分隔，支持格式：
+
+| 语法 | 含义 |
 |------|------|
-| 1080p | `-S "res:1080"` |
-| 4K / 2160p | `-S "res:2160"` |
-| 8K / 4320p | `-S "res:4320"` |
+| `URL 10:30-15:00` | 下载 10:30 到 15:00 |
+| `URL 01:20:30-01:45:00` | 含小时的格式 |
+| `URL 10:30` | 从 10:30 下载到结尾 |
+| `URL 10:30-` | 同上，从 10:30 到结尾 |
+| `URL 10:15-15:00 30:00-35:00` | 多区间叠加 |
 
-若最大高度 ≤ 1080p，自动下载无需询问。
+### 图片下载
 
-### 时间切片
+gallery-dl 处理图片类平台，ArtStation 最为常用。
 
-```bash
-# 下载 10:30 到 15:00
-yt-dlp --download-sections "*10:30-15:00" "URL"
+**下载单个项目：**
 
-# 多区间叠加
-yt-dlp --download-sections "*10:15-15:00" --download-sections "*30:00-35:00" "URL"
-
-# 从 10:30 到结尾
-yt-dlp --download-sections "*10:30-" "URL"
+```
+用户：下载这个 ArtStation 项目 https://www.artstation.com/artwork/Ov6Zwb
+Agent：检测到 ArtStation → 用 gallery-dl
+       下载全部文件到 artstation/用户名/项目名_01.png
 ```
 
-> 时间切片依赖 ffmpeg，会先检查 `command -v ffmpeg`。
-
-## Bilibili 下载
-
-### 基础命令
-
-```bash
-yt-dlp --impersonate chrome \
-  --add-header "Origin:https://www.bilibili.com" \
-  --add-header "Referer:https://www.bilibili.com" \
-  --cookies-from-browser chrome \
-  -P "下载目录" -o "%(title)s.%(ext)s" "URL"
-```
-
-### 清晰度策略
-
-Bilibili 提供多种编码格式，优先级策略：
-
-| 编码 | 格式代码 | 特点 | 适用场景 |
-|------|---------|------|---------|
-| AVC / H.264 | 30080+ | 兼容性最好 | 默认推荐 |
-| HEVC / H.265 | 30064+ | 体积更小 | 画质敏感 |
-| AV1 | 100026+ | 压缩率最高 | 网络差时可能超时 |
-
-Agent 自动从 `-F` 输出解析可用格式，若 AV1 下载超时则自动回退到 AVC。
-
-### Cookies 注意事项
-
-Bilibili 大会员内容需要登录态。Agent 优先使用主力浏览器 Cookies，若缺失则引导用户在 Bilibili 登录后重试。
-
-## Vimeo 下载
-
-Vimeo 公开视频可直接下载，无需特殊处理：
-
-```bash
-yt-dlp -P "下载目录" -o "%(title)s.%(ext)s" "URL"
-```
-
-需要提取特定编码的视频时，同样使用 `-F` 列表 + `-S "res:X"` 清晰度策略。非公开 / 已购 Vimeo 内容需要 Cookies。
-
-## ArtStation 下载
-
-gallery-dl 专用，不支持 yt-dlp。
-
-```bash
-gallery-dl -d "下载目录" -f "{title}_{num:02d}.{extension}" "URL"
-```
-
-### 文件结构
-
-默认目录模板 `{category}/{user[username]}/`，下载后结构为：
+项目内所有文件保存为：
 
 ```
 下载目录/
@@ -176,16 +159,22 @@ gallery-dl -d "下载目录" -f "{title}_{num:02d}.{extension}" "URL"
         └── 项目名_02.{ext}
 ```
 
-### 自定义字段
+**下载画师所有作品：**
 
-可用 `gallery-dl -K "URL"` 查看所有元数据字段。支持嵌套字段语法 `{dict[key]}`。
+```
+用户：下载这位画师的所有作品 https://www.artstation.com/artist/xxx
+Agent：检测到 ArtStation 画师主页 → 用 gallery-dl
+       遍历所有项目 → 按用户名组织目录
+```
+
+ArtStation 之外的图片站（如 Pixiv、DeviantArt、Twitter 图片等）同样由 gallery-dl 处理，Agent 自动识别 URL 选择合适工具。
 
 ## Cookies 获取
 
 Agent 按以下优先级获取 Cookies：
 
 1. **标准浏览器**：`--cookies-from-browser chrome` / `firefox` / `safari`
-2. **非标准 Chromium**：使用 `extract_cookies.py` 脚本提取
+2. **非标准 Chromium**：使用 `scripts/extract_cookies.py` 脚本提取
 3. **无 Cookies**：跳过，影响高画质 / 年龄限制内容
 
 ### 支持的 Chromium 系浏览器
@@ -200,29 +189,61 @@ Agent 按以下优先级获取 Cookies：
 | Vivaldi | `chromium` | ✅ |
 | Opera | `chromium` | ✅ |
 
-## 通用参数参考
+## 支持网站一览
 
-### yt-dlp
+### yt-dlp 视频平台（精选）
 
-| 参数 | 用途 |
-|------|------|
-| `-P <dir>` / `--paths <dir>` | 下载目录 |
-| `-o "<template>"` | 输出文件名（`%(var)s` 语法） |
-| `-S "res:1080"` | 限制并排序分辨率 |
-| `-f "bv*+ba/b"` | 最佳视频 + 最佳音频 |
-| `-F` | 列出格式 |
-| `--cookies-from-browser chrome` | 浏览器 Cookies |
-| `--impersonate chrome` | 浏览器指纹模拟（Bilibili 必需） |
-| `--download-sections "*START-END"` | 时间切片（需 ffmpeg） |
+| 站点 | URL 识别 |
+|------|---------|
+| YouTube | `youtube.com` / `youtu.be` |
+| Bilibili | `bilibili.com` / `b23.tv` |
+| Vimeo | `vimeo.com` |
+| Twitter / X | `twitter.com` / `x.com` |
+| Instagram | `instagram.com` |
+| TikTok | `tiktok.com` |
+| Facebook | `facebook.com` |
+| Twitch | `twitch.tv` |
+| Dailymotion | `dailymotion.com` |
+| Niconico | `nicovideo.jp` |
+| SoundCloud | `soundcloud.com` |
+| Bandcamp | `bandcamp.com` |
+| Reddit | `reddit.com` |
+| Tumblr | `tumblr.com` |
+| 抖音 / Douyin | `douyin.com` |
+| 快手 | `kuaishou.com` / `kuaishou.cn` |
+| 微博 | `weibo.com` |
+| Youku | `youku.com` |
+| Pornhub | `pornhub.com` |
+| NicoNico | `nicovideo.jp` |
 
-### gallery-dl
+> 完整列表 → [yt-dlp supported sites](https://github.com/yt-dlp/yt-dlp/blob/master/supportedsites.md)
 
-| 参数 | 用途 |
-|------|------|
-| `-d <dir>` / `--destination <dir>` | 下载目录（基础路径） |
-| `-f "<template>"` | 文件名模板（`{var}` 语法） |
-| `-K` / `--list-keywords` | 列出可用元数据字段 |
-| `--cookies-from-browser chrome` | 浏览器 Cookies |
+### gallery-dl 图库平台（精选）
+
+| 站点 | URL 识别 |
+|------|---------|
+| ArtStation | `artstation.com` |
+| Pixiv | `pixiv.net` |
+| DeviantArt | `deviantart.com` |
+| Twitter / X | `twitter.com` / `x.com` |
+| Instagram | `instagram.com` |
+| Flickr | `flickr.com` |
+| 500px | `500px.com` |
+| Behance | `behance.net` |
+| Dribbble | `dribbble.com` |
+| Ko-fi | `ko-fi.com` |
+| Patreon | `patreon.com` |
+| Pinterest | `pinterest.com` |
+| Imgur | `imgur.com` |
+| Reddit | `reddit.com` |
+| Danbooru | `danbooru.donmai.us` |
+| Sankaku | `sankakucomplex.com` |
+| Gelbooru | `gelbooru.com` |
+| Rule34 | `rule34.xxx` |
+| Zerochan | `zerochan.net` |
+| Newgrounds | `newgrounds.com` |
+
+> 完整列表 → [gallery-dl supported sites](https://github.com/mikf/gallery-dl/blob/master/docs/supportedsites.md)
 
 ## 文件结构
 
