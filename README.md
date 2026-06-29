@@ -52,7 +52,7 @@ Agent 检测站点类型
       ├── Bilibili / b23.tv ─────────→ yt-dlp（--impersonate chrome + cookies）
       │                                      │
       │                                      ▼
-      │                              问字幕/弹幕选项 → 列出格式
+       │                              列出格式
       │                                      │
       │                                      ▼
       │                              若 >1080p → 问清晰度选择
@@ -76,7 +76,7 @@ Agent 检测站点类型
 | 功能 | 说明 |
 |------|------|
 | YouTube 下载 | 清晰度选择（1080p / 4K / 8K）、时间切片、cookies 处理年龄限制 |
-| Bilibili 下载 | 大会员/高画质解锁、AI 字幕下载、弹幕下载、AV1/HEVC/AVC 格式策略 |
+| Bilibili 下载 | 大会员/高画质解锁、AV1/HEVC/AVC 格式策略 |
 | Vimeo 下载 | 公开视频无需特殊处理，cookies 支持未登录可下载 |
 | ArtStation 下载 | gallery-dl 专用，按用户名/项目名自动组织文件结构 |
 | 时间切片 | `URL HH:MM-SS` 语法，支持多区间叠加，依赖 ffmpeg |
@@ -141,13 +141,6 @@ Bilibili 提供多种编码格式，优先级策略：
 | AV1 | 100026+ | 压缩率最高 | 网络差时可能超时 |
 
 Agent 自动从 `-F` 输出解析可用格式，若 AV1 下载超时则自动回退到 AVC。
-
-### 字幕 / 弹幕
-
-| 选项 | 参数 |
-|------|------|
-| AI 字幕（中文） | `--write-subs --sub-lang ai-zh` |
-| 弹幕 | `--write-subs --sub-lang danmaku` |
 
 ### Cookies 注意事项
 
@@ -221,8 +214,6 @@ Agent 按以下优先级获取 Cookies：
 | `--cookies-from-browser chrome` | 浏览器 Cookies |
 | `--impersonate chrome` | 浏览器指纹模拟（Bilibili 必需） |
 | `--download-sections "*START-END"` | 时间切片（需 ffmpeg） |
-| `--write-subs` | 下载字幕 |
-| `--sub-lang ai-zh,danmaku` | 指定字幕语言 |
 
 ### gallery-dl
 
