@@ -1,0 +1,23 @@
+{
+  "skill_name": "media-downloader",
+  "evals": [
+    {
+      "id": 1,
+      "name": "bilibili-cookies-quality",
+      "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
+      "expected_output": "检测到 Bilibili 链接 → 获取 cookies（标准浏览器用 --cookies-from-browser，非标准 Chromium 用 extract_cookies.py）→ 用 --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 若高画质锁定则提示登录重试 → 若>1080p 问清晰度 → AV1 超时换 AVC"
+    },
+    {
+      "id": 2,
+      "name": "youtube-time-slice",
+      "prompt": "帮我把这个视频的一部分下了 https://youtu.be/dQw4w9WgXcQ 12:30-15:45",
+      "expected_output": "检测到 YouTube 链接 + 时间范围 12:30-15:45 → 检查 ffmpeg → 用 --download-sections '*12:30-15:45' → 列出格式 → 若>1080p 问清晰度"
+    },
+    {
+      "id": 3,
+      "name": "artstation-project",
+      "prompt": "ArtStation 这个项目 https://www.artstation.com/artwork/Ov6Zwb",
+      "expected_output": "检测到 ArtStation 链接 → 用 gallery-dl 下载 → 文件结构 artstation/{username}/{title}_{num:02d}.{extension}"
+    }
+  ]
+}
