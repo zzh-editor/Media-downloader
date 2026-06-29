@@ -150,9 +150,22 @@ yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"
 
 ## Cookies 获取引导
 
-### 优先使用 yt-dlp 原生方式
+### Cookies 获取路由
 
-各站点下载前，优先通过 yt-dlp 原生支持的 `--cookies-from-browser` 获取 cookies。
+从 config.json 读取 `browser` 和 `browser_profile` 字段，按以下规则路由：
+
+```
+browser = safari / chrome / edge / firefox / brave
+  → 方式 A：yt-dlp --cookies-from-browser <browser> ...
+
+browser 为其他值（如 dia、thorium 等自定义非标准 Chromium 浏览器）
+  → 方式 B：extract_cookies.py → yt-dlp --cookies /tmp/cookies.txt ...
+```
+
+方式 A 的 `<browser>` 从 config.json 的 `browser` 字段直接读取。
+方式 B 的 `browser_profile` 从 config.json 的 `browser_profile` 字段读取。
+
+### 方式 A：标准浏览器
 
 主力浏览器为 Chrome/Firefox/Safari/Edge/Brave 等标准浏览器时，直接用：
 
@@ -160,13 +173,13 @@ yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"
 yt-dlp --cookies-from-browser <browser> ...
 ```
 
-`<browser>` 从 supermemory 的偏好中读取。原生支持列表：brave, chrome, chromium, edge, firefox, opera, safari, vivaldi, whale
+yt-dlp 原生支持列表：brave, chrome, chromium, edge, firefox, opera, safari, vivaldi, whale
 
-### macOS 非标准 Chromium 浏览器（Dia/Thorium 等）
+### 方式 B：macOS 非标准 Chromium 浏览器
 
-当主力浏览器为"其他 Chromium 系"（如 Dia、Thorium），yt-dlp 的 `--cookies-from-browser chromium:"<PROFILE>"` 无法正确解密 cookies，因为其使用标准 Chromium 的 Keychain 密钥而非该浏览器的专用密钥。
+当主力浏览器为"其他 Chromium 系"（如 Dia、Thorium），**禁止使用** `--cookies-from-browser chromium:"<PROFILE>"`，因为 yt-dlp 会使用标准 Chromium 的 Keychain 密钥（"Chromium Safe Storage"）解密，而非该浏览器的专用密钥（如 Dia → "Dia Safe Storage"），导致大部分登录态的 cookies 解密失败。
 
-使用技能附带的 cookie 提取脚本：
+必须使用技能附带的 cookie 提取脚本：
 
 ```bash
 python3 <SKILL_DIR>/scripts/extract_cookies.py \
@@ -375,6 +388,8 @@ yt-dlp -F "<URL>"
 | `--cookies-from-browser chrome` | 浏览器 cookies |
 | `--impersonate chrome` | 浏览器指纹模拟 |
 | `--download-sections "*START-END"` | 时间切片（需 ffmpeg） |
+| `--write-subs` | 下载字幕 |
+| `--sub-lang ai-zh,danmaku` | 指定字幕语言 |
 | `--cookies-from-browser chrome` | 浏览器 cookies（标准浏览器用） |
 | `--cookies /tmp/cookies.txt` | 使用 cookies.txt（非标准浏览器用 extract_cookies.py 后） |
 
