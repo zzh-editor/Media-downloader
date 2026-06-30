@@ -186,6 +186,9 @@ python3 <SKILL_DIR>/scripts/extract_cookies.py \
   "<PROFILE_PATH>" --browser <浏览器名> \
   --domain <平台域名> > /tmp/cookies.txt
 
+# 验证 cookies 格式（首行须为 Netscape header）
+head -1 /tmp/cookies.txt | grep -q "Netscape HTTP Cookie File" && echo "OK"
+
 # 然后用 cookies.txt 调用
 yt-dlp --cookies /tmp/cookies.txt ...
 ```

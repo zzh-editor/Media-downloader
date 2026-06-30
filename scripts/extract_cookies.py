@@ -80,7 +80,6 @@ def main():
     cursor.execute("SELECT value FROM meta WHERE key = 'version'")
     meta_version = int(cursor.fetchone()[0])
     hash_prefix = meta_version >= 24
-    print(f"# meta version: {meta_version}, hash_prefix={hash_prefix}", file=sys.stderr)
 
     query = "SELECT host_key, name, value, path, expires_utc, is_secure, is_httponly, has_expires, encrypted_value FROM cookies"
     params = []
@@ -90,6 +89,7 @@ def main():
     cursor.execute(query, params)
 
     print("# Netscape HTTP Cookie File")
+    print(f"# meta version: {meta_version}, hash_prefix={hash_prefix}")
     print(f"# Extracted from: {profile_path} ({browser_name})")
     print(f"# Date: {datetime.now(timezone.utc).isoformat()}")
 
@@ -117,7 +117,7 @@ def main():
         count += 1
 
     conn.close()
-    print(f"# Total: {count} cookies", file=sys.stderr)
+    print(f"# Total: {count} cookies")
 
 if __name__ == "__main__":
     main()
