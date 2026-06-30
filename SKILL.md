@@ -218,6 +218,19 @@ yt-dlp --cookies /tmp/cookies.txt ...
 
 手动导出 cookies.txt 仅在上述方式完全不可用时才考虑，不属于标准交互流程。参考 `--cookies cookies.txt` 参数用法。
 
+## 执行规范
+
+所有下载命令优先检查环境是否提供 `bash_stream` 工具（支持流式进度推送，参数同 `bash`）：
+
+```
+if agent has tool "bash_stream":
+    用 bash_stream 执行下载命令（实时显示进度条）
+else:
+    用 bash 执行下载命令（完整输出兜底）
+```
+
+`bash_stream` 和 `bash` 的命令参数完全一致（command、timeout、workdir），只需切换工具名。
+
 ## 核心路由逻辑
 
 解析用户输入，按以下优先级处理：
