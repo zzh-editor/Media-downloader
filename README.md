@@ -30,50 +30,7 @@ npx skills@latest update https://github.com/zzh-editor/Media-downloader
 npx skills@latest list
 ```
 
-### 直接克隆（开发者）
-
-```bash
-git clone https://github.com/zzh-editor/Media-downloader.git
-cd Media-downloader
-```
-
 > 需要 [yt-dlp](https://github.com/yt-dlp/yt-dlp)、[gallery-dl](https://github.com/mikf/gallery-dl)、[ffmpeg](https://github.com/FFmpeg/FFmpeg)，首次运行自动引导安装。
-
-## 工作流程
-
-```
-用户发送链接
-      │
-      ▼
-Agent 检测站点类型
-      │
-      ├── ArtStation ─────────────────→ gallery-dl 下载
-      │
-      ├── Bilibili / b23.tv ─────────→ yt-dlp（--impersonate chrome + cookies）
-      │
-      ├── YouTube ───────────────────→ yt-dlp（cookies + 清晰度选择）
-      │
-      ├── Vimeo ─────────────────────→ yt-dlp 通用
-      │
-      └── 其他 ─────────────────────→ yt-dlp 通用
-                                           │
-                                           ▼
-                                   检查 URL 是否含时间范围
-                                           │
-                                      ├── 含时间 → 切片下载（需 ffmpeg）
-                                      │
-                                      └── 无时间 → 完整下载
-```
-
-## 核心能力
-
-| 功能 | 说明 |
-|------|------|
-| 视频下载 | YouTube / Bilibili / Vimeo 等主流视频站，自动选择最佳清晰度 |
-| 视频时间切片 | `URL 10:30-15:00` 语法，支持多区间叠加，依赖 ffmpeg |
-| 图片下载 | ArtStation 等图库站，支持画师主页与单个项目 |
-| 清晰度选择 | 自动探测格式列表，≥1080p 时询问用户偏好 |
-| Cookies 获取 | 支持标准浏览器 + 非标准 Chromium（Dia/Brave/Edge 等） |
 
 ## 下载方式
 
@@ -168,6 +125,42 @@ Agent：检测到 ArtStation 画师主页 → 用 gallery-dl
 ```
 
 ArtStation 之外的图片站（如 Pixiv、DeviantArt、Twitter 图片等）同样由 gallery-dl 处理，Agent 自动识别 URL 选择合适工具。
+
+## 工作流程
+
+```
+用户发送链接
+      │
+      ▼
+Agent 检测站点类型
+      │
+      ├── ArtStation ─────────────────→ gallery-dl 下载
+      │
+      ├── Bilibili / b23.tv ─────────→ yt-dlp（--impersonate chrome + cookies）
+      │
+      ├── YouTube ───────────────────→ yt-dlp（cookies + 清晰度选择）
+      │
+      ├── Vimeo ─────────────────────→ yt-dlp 通用
+      │
+      └── 其他 ─────────────────────→ yt-dlp 通用
+                                           │
+                                           ▼
+                                   检查 URL 是否含时间范围
+                                           │
+                                      ├── 含时间 → 切片下载（需 ffmpeg）
+                                      │
+                                      └── 无时间 → 完整下载
+```
+
+## 核心能力
+
+| 功能 | 说明 |
+|------|------|
+| 视频下载 | YouTube / Bilibili / Vimeo 等主流视频站，自动选择最佳清晰度 |
+| 视频时间切片 | `URL 10:30-15:00` 语法，支持多区间叠加，依赖 ffmpeg |
+| 图片下载 | ArtStation 等图库站，支持画师主页与单个项目 |
+| 清晰度选择 | 自动探测格式列表，≥1080p 时询问用户偏好 |
+| Cookies 获取 | 支持标准浏览器 + 非标准 Chromium（Dia/Brave/Edge 等） |
 
 ## Cookies 获取
 
