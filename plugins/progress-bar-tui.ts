@@ -45,11 +45,9 @@ export default (async (api) => {
     return ["~", "∫", "ζ", "≋"][frame % 4]
   }
 
-  const BAR_W_SB = 12
-
   api.slots.register({
     slots: {
-      sidebar_footer: () => {
+      session_prompt_right: () => {
         if (!active) return null
 
         const now = Date.now()
@@ -61,25 +59,26 @@ export default (async (api) => {
         const catLen = [...cat].length
 
         if (pct >= 100) {
-          return `100% █${"█".repeat(BAR_W_SB)}█ ${t}${t} 到达！`
+          return `100% █${"█".repeat(BAR_W)}█ 100% ✓`
         }
 
-        const filled = Math.round((pct / 100) * BAR_W_SB)
+        const filled = Math.round((pct / 100) * BAR_W)
         const catEnd = filled + catLen
-        const overflow = catEnd - BAR_W_SB
+        const overflow = catEnd - BAR_W
 
         let bar: string
         if (overflow >= catLen) {
-          bar = "█".repeat(BAR_W_SB)
+          bar = "█".repeat(BAR_W)
         } else if (overflow > 0) {
           const visible = [...cat].slice(0, catLen - overflow).join("")
           bar = "█".repeat(filled) + visible
         } else {
-          const after = BAR_W_SB - filled - catLen
+          const after = BAR_W - filled - catLen
           bar = "█".repeat(filled) + cat + "░".repeat(Math.max(0, after))
         }
 
-        return `${Math.round(pct)}% ${bar}`
+        const pctS = `${Math.round(pct)}%`.padStart(4)
+        return `${pctS} ${bar} ${pctS}`
       },
     },
   })
