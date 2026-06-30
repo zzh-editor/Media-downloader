@@ -21,6 +21,9 @@ export default (async ({ directory }) => {
         async execute(args, ctx) {
           const cwd = args.workdir || directory || "."
           const cmd = args.command
+          const desc = args.description || ""
+
+          ctx.metadata({ title: desc ? `⏳ ${desc}` : "⏳ 执行中..." })
 
           const child = spawn("bash", ["-c", cmd], { cwd, stdio: ["pipe", "pipe", "pipe"] })
 
@@ -41,10 +44,10 @@ export default (async ({ directory }) => {
             const text = chunk.toString()
             const matches = [...text.matchAll(pctRegex)]
             if (matches.length > 0) {
+              const pct = matches[matches.length - 1][1]
               ctx.metadata({
-                metadata: {
-                  pct: matches[matches.length - 1][1],
-                },
+                title: `${Math.round(parseFloat(pct))}%${desc ? ` ${desc}` : ""}`,
+                metadata: { pct },
               })
             }
           })
@@ -54,7 +57,10 @@ export default (async ({ directory }) => {
           })
 
           await new Promise<void>((resolve) => {
-            child.on("exit", () => resolve())
+            child.on("exit", () => {
+              ctx.metadata({ title: desc ? `✓ ${desc}` : "✓ 完成" })
+              resolve()
+            })
             child.on("error", () => resolve())
           })
 
