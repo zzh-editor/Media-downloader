@@ -404,8 +404,6 @@ yt-dlp -F "<URL>"
 | `--cookies-from-browser chrome` | 浏览器 cookies |
 | `--impersonate chrome` | 浏览器指纹模拟 |
 | `--download-sections "*START-END"` | 时间切片（需 ffmpeg） |
-| `--write-subs` | 下载字幕 |
-| `--sub-lang ai-zh,danmaku` | 指定字幕语言 |
 | `--cookies-from-browser chrome` | 浏览器 cookies（标准浏览器用） |
 | `--cookies /tmp/cookies.txt` | 使用 cookies.txt（非标准浏览器用 extract_cookies.py 后） |
 
