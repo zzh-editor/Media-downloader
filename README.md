@@ -1,6 +1,6 @@
 # Media Downloader
 
-跨平台素材下载 Agent Skill — 基于 [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [gallery-dl](https://github.com/mikf/gallery-dl)，覆盖 YouTube、Bilibili、Vimeo、ArtStation 等数百个站点。
+跨平台素材下载 Agent Skill — 基于 [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [gallery-dl](https://github.com/mikf/gallery-dl) + [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) + [parse-video-py](https://github.com/wujunwei928/parse-video-py)，覆盖 YouTube、Bilibili、Vimeo、ArtStation、小红书、抖音等数百个站点。
 
 ## 触发词
 
@@ -10,10 +10,11 @@
 下载这个视频 / 把这个下了 / 帮我下这个
 下载链接 / 保存这个视频 / 下载 B 站
 下这个 youtube / ArtStation 下载 / 把这个项目下了
-下个视频 / 帮我下个东西
+下个视频 / 帮我下个东西 / 小红书下载 / 抖音去水印
+下个抖音 / 下这个小红书
 ```
 
-输入 URL 后 Agent 自动检测站点，选择合适工具，处理清晰度、Cookies、时间切片等需求。
+输入 URL 后 Agent 自动检测站点，选择合适工具，处理清晰度、Cookies、时间切片、去水印等需求。
 
 ## 安装
 
@@ -30,7 +31,7 @@ npx skills@latest update https://github.com/zzh-editor/Media-downloader
 npx skills@latest list
 ```
 
-> 需要 [yt-dlp](https://github.com/yt-dlp/yt-dlp)、[gallery-dl](https://github.com/mikf/gallery-dl)、[ffmpeg](https://github.com/FFmpeg/FFmpeg)，首次运行自动引导安装。
+> 需要 [yt-dlp](https://github.com/yt-dlp/yt-dlp)、[gallery-dl](https://github.com/mikf/gallery-dl)、[ffmpeg](https://github.com/FFmpeg/FFmpeg)、[XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader)、[parse-video-py](https://github.com/wujunwei928/parse-video-py)，首次运行自动引导安装。
 
 ## 下载方式
 
@@ -126,6 +127,34 @@ Agent：检测到 ArtStation 画师主页 → 用 gallery-dl
 
 ArtStation 之外的图片站（如 Pixiv、DeviantArt、Twitter 图片等）同样由 gallery-dl 处理，Agent 自动识别 URL 选择合适工具。
 
+### 小红书图文/视频下载
+
+[XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) 处理小红书内容，支持图文笔记和视频下载。
+
+```
+用户：下载这个小红书 https://www.xiaohongshu.com/explore/xxx
+Agent：检测到 xiaohongshu.com → 检查 XHS-Downloader
+       启动 API 服务 → 调用下载接口
+       保存到 下载目录/Download/
+```
+
+```
+用户：小红书这个笔记 https://www.xiaohongshu.com/explore/xxx
+Agent：检测到小红书链接 → XHS-Downloader API 模式
+       下载图文/视频到 下载目录/Download/
+```
+
+### 抖音无水印视频下载
+
+[parse-video-py](https://github.com/wujunwei928/parse-video-py) 处理抖音无水印解析，支持单视频和图集。
+
+```
+用户：下个抖音 https://v.douyin.com/xxx
+Agent：检测到 douyin.com → 用 parse-video-py
+       启动解析服务 → 获取无水印直链
+       下载到 下载目录/
+```
+
 ## 工作流程
 
 ```
@@ -141,6 +170,10 @@ Agent 检测站点类型
       ├── YouTube ───────────────────→ yt-dlp（cookies + 清晰度选择）
       │
       ├── Vimeo ─────────────────────→ yt-dlp 通用
+      │
+      ├── 小红书 / xiaohongshu ──────→ XHS-Downloader（API 下载）
+      │
+      ├── 抖音 / douyin ────────────→ parse-video-py（无水印解析）
       │
       └── 其他 ─────────────────────→ yt-dlp 通用
                                            │
@@ -159,6 +192,8 @@ Agent 检测站点类型
 | 视频下载 | YouTube / Bilibili / Vimeo 等主流视频站，自动选择最佳清晰度 |
 | 视频时间切片 | `URL 10:30-15:00` 语法，支持多区间叠加，依赖 ffmpeg |
 | 图片下载 | ArtStation 等图库站，支持画师主页与单个项目 |
+| 小红书下载 | 图文笔记 + 视频，XHS-Downloader API 模式 |
+| 抖音去水印 | 无水印视频解析 + 下载，parse-video-py 解析引擎 |
 | 清晰度选择 | 自动探测格式列表，≥1080p 时询问用户偏好 |
 | Cookies 获取 | 支持标准浏览器 + 非标准 Chromium（Dia/Brave/Edge 等） |
 
@@ -202,7 +237,6 @@ Agent 按以下优先级获取 Cookies：
 | Bandcamp | `bandcamp.com` |
 | Reddit | `reddit.com` |
 | Tumblr | `tumblr.com` |
-| 抖音 / Douyin | `douyin.com` |
 | 快手 | `kuaishou.com` / `kuaishou.cn` |
 | 微博 | `weibo.com` |
 | Youku | `youku.com` |
@@ -238,6 +272,15 @@ Agent 按以下优先级获取 Cookies：
 
 > 完整列表 → [gallery-dl supported sites](https://github.com/mikf/gallery-dl/blob/master/docs/supportedsites.md)
 
+## 专用工具
+
+| 工具 | 用途 | 平台 |
+|------|------|------|
+| [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) | 小红书图文/视频下载 | xiaohongshu.com / xhslink.com / rednote.com |
+| [parse-video-py](https://github.com/wujunwei928/parse-video-py) | 抖音无水印视频解析 | douyin.com / v.douyin.com |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | 通用视频下载引擎 | YouTube / Bilibili / Vimeo 等 |
+| [gallery-dl](https://github.com/mikf/gallery-dl) | 图库下载引擎 | ArtStation / Pixiv / DeviantArt 等 |
+
 ## 文件结构
 
 ```
@@ -245,6 +288,9 @@ Media-downloader/
 ├── scripts/
 │   ├── check_env.sh           # 环境检查脚本
 │   └── extract_cookies.py     # 非标准 Chromium cookie 提取
+├── plugins/
+│   ├── progress-bar.ts        # 进度条组件
+│   └── progress-bar-tui.ts    # TUI 进度条组件
 ├── evals/                     # 评估数据
 ├── SKILL.md                   # Agent skill 定义（完整工作流）
 ├── test-prompts.json          # 测试用例
@@ -257,6 +303,8 @@ Media-downloader/
 
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — 视频下载核心引擎
 - [gallery-dl](https://github.com/mikf/gallery-dl) — 图库下载引擎
+- [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) — 小红书下载
+- [parse-video-py](https://github.com/wujunwei928/parse-video-py) — 抖音无水印解析
 - [FFmpeg](https://github.com/FFmpeg/FFmpeg) — 音视频处理与时间切片
 - [curl_cffi](https://github.com/yifeikong/curl_cffi) — 浏览器指纹模拟（Bilibili 必需）
 

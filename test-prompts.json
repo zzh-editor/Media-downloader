@@ -1,17 +1,27 @@
 [
   {
     "id": 1,
-    "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
-    "expected": "检测到 Bilibili 链接 → 获取 cookies（标准浏览器用 --cookies-from-browser，非标准 Chromium 用 extract_cookies.py） → 用 --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 若高画质锁定则提示登录重试 → 若>1080p 问清晰度 → 注意 AV1 超时换 AVC"
+    "prompt": "帮我把这个视频的一部分下了 https://youtu.be/dQw4w9WgXcQ 12:30-15:45",
+    "expected": "检测到 YouTube 链接 + 时间范围 12:30-15:45 → 检查 ffmpeg → 列出格式 → max≤1080p 自动下载 1080p → --download-sections '*12:30-15:45' 切片下载"
   },
   {
     "id": 2,
-    "prompt": "帮我把这个视频的一部分下了 https://youtu.be/dQw4w9WgXcQ 12:30-15:45",
-    "expected": "检测到 YouTube 链接 + 时间范围 12:30-15:45 → 检查 ffmpeg → 用 --download-sections '*12:30-15:45' → 列出格式 → 若>1080p 问清晰度"
+    "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
+    "expected": "检测到 Bilibili → 从 config.json 读取 browser → --cookies-from-browser 或 extract_cookies.py 获取 cookies → --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 高画质锁定则提示登录重试 → >1080p 问清晰度"
   },
   {
     "id": 3,
     "prompt": "ArtStation 这个项目 https://www.artstation.com/artwork/Ov6Zwb",
-    "expected": "检测到 ArtStation 链接 → 用 gallery-dl 下载 → 文件结构 artstation/{username}/{title}_{num:02d}.{extension}"
+    "expected": "检测到 ArtStation → gallery-dl -d \"$DOWNLOAD_DIR\" -f \"{title}_{num:02d}.{extension}\" → 文件结构 artstation/{username}/{title}_01.{ext}"
+  },
+  {
+    "id": 4,
+    "prompt": "下载这个小红书 https://www.xiaohongshu.com/explore/6a2c05650000000006023b66",
+    "expected": "检测到 xiaohongshu.com → 检查 XHS-Downloader 已安装 → 从 config.json 读取 download_dir → 启动 API 服务 --work_path \"$DOWNLOAD_DIR\" → curl POST /xhs/detail {url, download:true} → 保存到 {download_dir}/Download/"
+  },
+  {
+    "id": 5,
+    "prompt": "下个抖音视频 https://v.douyin.com/xxx",
+    "expected": "检测到 douyin.com/v.douyin.com → 检查 parse-video-py 已安装 → 启动 HTTP 服务 python main.py → 调用 /video/share/url/parse?url=分享链接 → 提取 video_url → 从 config.json 读取 download_dir → curl/yt-dlp 下载无水印视频到 download_dir"
   }
 ]
