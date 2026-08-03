@@ -7,7 +7,7 @@
   {
     "id": 2,
     "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
-    "expected": "检测到 Bilibili → 从 config.json 读取 browser → --cookies-from-browser 或 extract_cookies.py 获取 cookies → --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 高画质锁定则提示登录重试 → >1080p 问清晰度"
+    "expected": "检测到 Bilibili → 读取 cookies_dir/bilibili.txt（无则提示用 Get cookies.txt LOCALLY 导出上传）→ --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 高画质锁定则提示更新 cookies 重试 → >1080p 问清晰度"
   },
   {
     "id": 3,
@@ -23,5 +23,15 @@
     "id": 5,
     "prompt": "下个抖音视频 https://v.douyin.com/xxx",
     "expected": "检测到 douyin.com/v.douyin.com → 检查 parse-video-py 已安装 → 启动 HTTP 服务 python main.py → 调用 /video/share/url/parse?url=分享链接 → 提取 video_url → 从 config.json 读取 download_dir → curl/yt-dlp 下载无水印视频到 download_dir"
+  },
+  {
+    "id": 6,
+    "prompt": "下载 therookies 这个比赛的全部作品 https://www.therookies.co/contests/549/results",
+    "expected": "检测到 therookies.co/contests → 用 BrowserClaw 打开 results 页 → evaluate 提取比赛名（normalize 空白后剥 Finalists 前缀）+ 全部 entry 链接 → 页内批量 fetch 每个 entry HTML → parseEntry 解析每作品的 youtube/vimeo/direct 视频链接（无视频的作品提取 cloudfront 图片 URL，尺寸段替换为 3840xAUTO）→ oEmbedTitle 补每条视频真实标题、classify 分类 main/breakdown/locked/other → 对话中呈现 DIFF 表格（成片/衍生分列、纯图片列图片数）交用户挑选 → 按所选作品建 {比赛名}/{作品名 by 作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp -S res:1080、Vimeo 需登录未登录则提示登录、纯图片用 curl 下载 3840xAUTO 原图"
+  },
+  {
+    "id": 7,
+    "prompt": "下载 therookies 这个作品 https://www.therookies.co/entries/47874",
+    "expected": "检测到 therookies.co/entries（单作品）→ 用 BrowserClaw 打开 entry 页 → 页内 evaluate 解析当前 document：og:title 取标题/作者、.project-content 内 iframe + 原生 video 取视频清单（youtube/vimeo/direct）、仅当无视频时取 img 提取 cloudfront 图片 URL 并替换 3840xAUTO → oEmbedTitle 补标题 + classify 分 main/breakdown/locked → 对话呈现资源（成片/衍生分列、纯图列图片数）→ 建 {作品标题} by {作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp、Vimeo 需登录、纯图片用 curl 3840xAUTO"
   }
 ]

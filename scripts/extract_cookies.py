@@ -69,8 +69,8 @@ def main():
         print(f"Error: No Keychain entry found for {account}/{service}", file=sys.stderr)
         sys.exit(1)
 
-    # yt-dlp uses the raw keychain output (base64 string) directly as PBKDF2 password
-    # NOT the base64-decoded bytes
+    # yt-dlp 直接使用 keychain 原始输出（base64 字符串）作为 PBKDF2 密码
+    # 而不是 base64 解码后的字节
     key = derive_key(pw)
     print(f"# Keychain: {account} / {service}", file=sys.stderr)
 

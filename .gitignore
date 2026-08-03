@@ -2,3 +2,6 @@ config.json
 .DS_Store
 __pycache__/
 *.pyc
+
+# 用户上传的各平台 cookies（含真实登录态，勿提交）
+cookies/
