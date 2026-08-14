@@ -5,7 +5,7 @@
       "id": 1,
       "name": "bilibili-cookies-quality",
       "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
-      "expected_output": "检测到 Bilibili 链接 → 读取 cookies_dir/bilibili.txt（无则提示用 Get cookies.txt LOCALLY 导出上传）→ 用 --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 若高画质锁定则提示更新 cookies 重试 → 若>1080p 问清晰度 → AV1 超时换 AVC"
+      "expected_output": "检测到 Bilibili 链接 → 读 cookies_dir/bilibili.txt（无则引导从浏览器登录态直取，见 Cookies 引导）→ 用 --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 若高画质锁定则提示更新 cookies 重试 → 若>1080p 问清晰度 → AV1 超时换 AVC"
     },
     {
       "id": 2,
@@ -21,15 +21,27 @@
     },
     {
       "id": 4,
-      "name": "therookies-contest",
-      "prompt": "下载 therookies 这个比赛的全部作品 https://www.therookies.co/contests/549/results",
-      "expected_output": "检测到 therookies.co/contests → 用 BrowserClaw 打开 results 页 → evaluate 提取比赛名（normalize 空白后剥 Finalists 前缀）+ 全部 entry 链接 → 页内批量 fetch 每个 entry HTML → parseEntry 解析每作品的 youtube/vimeo/direct 视频链接（无视频的作品提取 cloudfront 图片 URL，尺寸段替换为 3840xAUTO）→ oEmbedTitle 补每条视频真实标题、classify 分类 main/breakdown/locked/other → 对话中呈现 DIFF 表格（成片/衍生分列、纯图片列图片数）交用户挑选 → 按所选作品建 {比赛名}/{作品名 by 作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp -S res:1080、Vimeo 需登录未登录则提示登录、纯图片用 curl 下载 3840xAUTO 原图"
+      "name": "vimeo-jwt-turnstile",
+      "prompt": "Vimeo 这个视频 https://vimeo.com/1199171757",
+      "expected_output": "检测到 Vimeo 链接 → 先试 yt-dlp（公开可过）；401/403（Cloudflare Turnstile 挡 player.vimeo.com）→ 立即转 JWT 方案（不要无限重试）→ browser-harness 打开视频页 js() 提取 __NEXT_DATA__.props.pageProps.viewerBootstrap.jwt → python3 scripts/vimeo_jwt_dl.py --video 1199171757 --jwt \"$JWT\" -o 下载 → 选 ≤1080p，>1080p 问清晰度"
     },
     {
       "id": 5,
+      "name": "cookies-storage-direct",
+      "prompt": "需要下载需要登录的高画质内容，先帮我搞定 cookies",
+      "expected_output": "读 config.json 的 cookies_dir → 无 <平台>.txt → 用 browser-harness 连真实浏览器 → cdp(\"Network.getAllCookies\") 导出全部 cookie（含 HttpOnly）→ json.dump /tmp/cookies.json → python3 scripts/storage_state_to_netscape.py /tmp/cookies.json -o cookies_dir/<平台>.txt --domain <域名> → 验证首行 # Netscape HTTP Cookie File → 下载时加 --cookies 复用"
+    },
+    {
+      "id": 6,
+      "name": "therookies-contest",
+      "prompt": "下载 therookies 这个比赛的全部作品 https://www.therookies.co/contests/549/results",
+      "expected_output": "检测到 therookies.co/contests → curl 直连 results 页解析比赛名 + 全部 entry 链接 → 逐作品用 browser-harness 打开 entry 页 js() 解析每作品的 youtube/vimeo/direct 视频链接（无视频的作品提取 cloudfront 图片 URL，尺寸段替换为 3840xAUTO）→ oEmbedTitle 补每条视频真实标题、classify 分类 main/breakdown/locked/other → 对话中呈现 DIFF 表格（成片/衍生分列、纯图片列图片数）交用户挑选 → 按所选作品建 {比赛名}/{作品名} 目录（用 parseEntry 干净 og:title + sanitize_title 命名） → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp -S res:1080、Vimeo 先试 yt-dlp 被 Turnstile 挡则 JWT 方案、原生 video/纯图片用 curl"
+    },
+    {
+      "id": 7,
       "name": "therookies-single-entry",
       "prompt": "下载 therookies 这个作品 https://www.therookies.co/entries/47874",
-      "expected_output": "检测到 therookies.co/entries（单作品）→ 用 BrowserClaw 打开 entry 页 → 页内 evaluate 解析当前 document：og:title 取标题/作者、.project-content 内 iframe + 原生 video 取视频清单、仅当无视频时取 img 提取 cloudfront 图片 URL 并替换 3840xAUTO → oEmbedTitle 补标题 + classify 分 main/breakdown/locked → 对话呈现资源（成片/衍生分列、纯图列图片数）→ 建 {作品标题} by {作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp、Vimeo 需登录、纯图片用 curl 3840xAUTO"
+      "expected_output": "检测到 therookies.co/entries（单作品）→ 用 browser-harness 打开 entry 页 → 页内 js() 解析当前 document：og:title 取标题/作者、.project-content 内 iframe + 原生 video 取视频清单、同时取 img 提取全部 cloudfront 图片 URL 并替换 3840xAUTO → oEmbedTitle 补标题 + classify 分 main/breakdown/locked → 对话呈现资源（成片/衍生分列、图片列展示附带图数）→ 建 {作品标题} 目录（用 parseEntry 干净 og:title + sanitize_title 命名） → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp、Vimeo 先试 yt-dlp 被 Turnstile 挡则 JWT、纯图片用 curl 3840xAUTO"
     }
   ]
 }

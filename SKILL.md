@@ -1,63 +1,80 @@
 ---
 name: media-downloader
 description: >
-   基于 yt-dlp、gallery-dl、XHS-Downloader 和 parse-video-py 的跨平台素材下载技能，
-   覆盖 YouTube、Bilibili、Vimeo、ArtStation、小红书、抖音、TheRookies 等数百个站点。
-   当用户给出视频/图片链接请求下载时，必须使用此技能——包括但不限于："下载这个视频"、"把这个下了"、
-   "帮我下这个"、"下载链接"、"保存这个视频"、"下载 B 站"、"下这个 youtube"、"ArtStation 下载"、
-   "把这个项目下了"、"下个视频"、"帮我下个东西"、"下这个小红书"、"小红书这个笔记"、"下个抖音"、
-   "抖音去水印"、"下载 therookies 这个比赛"等。技能自动处理清晰度选择（超过1080p询问用户）、
-   时间节点切片下载、ArtStation 项目按用户名/项目名组织、TheRookies 比赛按作品批量组织。
-   gallery-dl 专门用于图片画廊类网站下载（ArtStation、Pixiv、DeviantArt 等）。
-   XHS-Downloader 专门用于小红书图文/视频下载。
-   parse-video-py 专门用于抖音等平台无水印视频解析。
-   TheRookies（therookies.co）用 BrowserClaw 爬取比赛结果页或单个作品页，按作品下载 YouTube/Vimeo 视频，纯图片作品下载 CloudFront 图片。
-   任何时候用户提供 URL 并涉及下载行为，优先考虑此技能。
+    基于 yt-dlp、gallery-dl、XHS-Downloader 和 parse-video-py 的跨平台、跨 agent 素材下载技能，
+    覆盖 YouTube、Bilibili、Vimeo、ArtStation、小红书、抖音、TheRookies 等数百个站点。
+    用户给出视频/图片链接请求下载时必须使用，包括"下载这个视频/把这个下了/帮我下这个/下载链接/保存这个视频/
+    下载 B 站/下这个 youtube/ArtStation 下载/把这个项目下了/下个视频/帮我下个东西/下这个小红书/小红书这个笔记/
+    下个抖音/抖音去水印/下载 therookies 这个比赛"。技能自动处理清晰度选择（>1080p 询问）、时间切片下载、
+    ArtStation 按用户名/项目名组织、TheRookies 比赛按作品批量组织。gallery-dl 用于图片画廊站
+    （ArtStation、Pixiv、DeviantArt），XHS-Downloader 用于小红书，parse-video-py 用于抖音等无水印视频。
+    therookies 结果页用 curl 直连，作品页/被 Cloudflare 拦截的页面用 browser-harness 直连用户真实浏览器
+    解析（自带登录态，天然过 Cloudflare）；YouTube/Vimeo 视频走 yt-dlp（Vimeo 被 Turnstile 挡住时用 JWT 方案绕开），
+    图片与内嵌视频用 curl/浏览器解析。cookies 优先从真实浏览器登录态直取（browser-harness CDP 导出转 Netscape），
+    Get cookies.txt LOCALLY 扩展仅作兜底。任何时候用户提供 URL 并涉及下载行为，优先考虑此技能。
 ---
 
 # media-downloader
 
-基于 [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [gallery-dl](https://github.com/mikf/gallery-dl) + [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) + [parse-video-py](https://github.com/wujunwei928/parse-video-py) 的跨平台素材下载技能。
+基于 [yt-dlp](https://github.com/yt-dlp/yt-dlp) + [gallery-dl](https://github.com/mikf/gallery-dl) + [XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) + [parse-video-py](https://github.com/wujunwei928/parse-video-py) 的跨平台、跨 agent 素材下载技能。配置存于 `<SKILL_DIR>/config.json` 跨会话持久化。
+
+**浏览器后端原则**：浏览器解析统一用 **browser-harness**——一个直连**用户真实浏览器**（Dia / Chrome / Edge 等）的 CDP harness，自带登录态、天然过 Cloudflare（headless 浏览器过不了的痛点）。（macOS Safari MCP、Playwright MCP 均已弃用。）
 
 ## First Run Setup
 
-🔴 **CHECKPOINT**：在当前会话首次下载前，先确认下载目录和 cookies 目录。
-
-技能使用 `<SKILL_DIR>/config.json` 跨会话持久化用户偏好。
-
-### 读取已有配置
-
-```
-尝试读取 <SKILL_DIR>/config.json：
-
-if 文件存在且字段完整:
-    直接使用 download_dir 和 cookies_dir
-    跳过步骤 1-2
-else:
-    进入步骤 1-2 询问并写入
-```
-
-### 步骤 1：设置下载目录
-
-用 `question` 引导设置：
+🔴 **CHECKPOINT**：会话首次下载前确认下载目录、cookies 目录、浏览器后端。先读 `<SKILL_DIR>/config.json`：
+- 存在且字段完整 → 直接用 `download_dir` / `cookies_dir`，跳过设置
+- 否则用 `question` 逐一设置，写入 config.json
 
 ```
 请设置素材下载目录（所有下载的素材将保存到这里）：
 ```
 
-写入 `config.json` 的 `download_dir` 字段。用户可通过 `-P` 或 `--paths` 参数临时覆盖。
-
-### 步骤 2：设置 cookies 目录
-
-用 `question` 引导设置：
+写入 `download_dir`。用户可通过 `-P` / `--paths` 临时覆盖。
 
 ```
-cookies 由你上传（用 Get cookies.txt LOCALLY 扩展导出），保存到哪个目录？
+cookies 由浏览器登录态直取（或 Get cookies.txt LOCALLY 扩展导出兜底），保存到哪个目录？
 □ <SKILL_DIR>/cookies（推荐，随技能持久保存）
 □ 自定义路径
 ```
 
-写入 `config.json` 的 `cookies_dir` 字段。
+写入 `cookies_dir`。
+
+### browser-harness 检查（浏览器后端）
+
+🔴 **CHECKPOINT**：需要浏览器解析（Cloudflare 拦截页、rookies entry 页、登录态/cookies 提取）时，先确认 browser-harness 可用且能连上用户浏览器：
+
+```bash
+command -v browser-harness && browser-harness --version
+```
+
+- 未安装 → 引导安装（Python 3.12 + uv）：
+
+```bash
+uv tool install --python 3.12 --upgrade --force browser-harness
+browser-harness --doctor   # 诊断
+```
+
+- 已安装 → 测连接（**Dia 默认 CDP 端点在 127.0.0.1:9222，是纯 WebSocket**，不是标准 HTTP）：
+
+```bash
+BU_CDP_WS="ws://127.0.0.1:9222/devtools/browser" browser-harness <<'PY'
+print(page_info())
+PY
+```
+
+能打印 `{url, title, ...}` 即连接成功。否则按「浏览器连接引导」处理。
+
+#### 浏览器连接引导（按优先级）
+
+1. **已有 CDP 端点**（Dia 9222 默认 / 用户提供 / `--remote-debugging-port` 起的 Chrome）→ 直接用 `BU_CDP_WS`（WS 端点）或 `BU_CDP_URL`（HTTP 端点），可写入 `config.json` 的 `cdp_url` 跨会话复用
+2. **Chrome 在跑但没开远程调试** → 引导用户手动开启一次：
+   - 在 Chrome 打开 `chrome://inspect/#remote-debugging`
+   - 勾选 "Allow remote debugging for this browser instance"
+   - 首次连接时弹 "Allow remote debugging?" 弹窗点 Allow（Chrome 144+ 每次新连接都会弹，daemon 持单连接故只点一次）
+3. **Chrome 没在跑** → browser-harness 会自动拉起 Chrome 并重试（用户只需点 Allow 弹窗）
+
+> 实测：Dia 的 9222 是纯 WS 端点，HTTP `/json/version` 返回 404，必须用 `BU_CDP_WS=ws://127.0.0.1:9222/devtools/browser`。browser-harness 连上 Dia 后 `page_info()` 拿到实时页面，打开 therookies entry 页**无 Cloudflare 拦截**，`js()` 直接跑解析脚本返回完整数据。
 
 ### config.json 格式
 
@@ -65,239 +82,211 @@ cookies 由你上传（用 Get cookies.txt LOCALLY 扩展导出），保存到�
 {
   "download_dir": "~/Downloads",
   "cookies_dir": "~/.config/opencode/skills/media-downloader/cookies",
+  "cdp_url": "ws://127.0.0.1:9222/devtools/browser",
   "update_interval_days": 7,
   "last_update_check": "2026-08-02"
 }
 ```
 
 - `download_dir`：素材下载目录
-- `cookies_dir`：用户上传 cookies 文件的目录（见 Cookies 获取引导）
-- `update_interval_days`：yt-dlp/gallery-dl 自动更新检查间隔天数，默认 7（见 工具自动更新）
+- `cookies_dir`：用户 cookies 文件目录（见 Cookies 引导）
+- `cdp_url`：browser-harness 连接的 CDP 端点（WS 或 HTTP；Dia 默认 `ws://127.0.0.1:9222/devtools/browser`，Chrome `--remote-debugging-port` 起的用 `http://127.0.0.1:9222`）
+- `update_interval_days`：工具自动更新检查间隔天数，默认 7（见 工具自动更新）
 - `last_update_check`：上次更新检查日期（ISO 格式，技能自动维护）
-- 更新配置：直接修改此 JSON 文件，或要求技能重新设置
 
 ## 下载目录统一管理
 
-所有平台的下载文件统一保存到 `config.json` 的 `download_dir` 字段指定的目录。
+所有平台的下载文件统一保存到 `config.json` 的 `download_dir`。工具路由：
+- `yt-dlp` / `gallery-dl` → 用 `-P` / `-d` 直接指定 download_dir
+- `XHS-Downloader` → 启动时 `--work_path` 指向 download_dir（小红书章节）
+- `parse-video-py` → 下载时 `-o`/`-P` 指定 download_dir（抖音章节）
 
-工具路由规则：
-
-```
-yt-dlp / gallery-dl
-  → 用 -P / -d 参数直接指定 download_dir
-
-XHS-Downloader
-  → 启动时用 --work_path 指向 download_dir（见小红书专用处理）
-
-parse-video-py
-  → curl/yt-dlp 下载时 -o/-P 指定 download_dir（见抖音无水印专用处理）
-```
-
-允许用户通过脚本上下文或询问临时覆盖目录：
-
-```
-if 用户在请求中指定了 --output <path> 或 -P <path> 或 "--paths <path>":
-    临时覆盖 download_dir
-else:
-    使用 config.json 的 download_dir
-```
+用户请求里指定 `--output <path>` / `-P <path>` / `--paths <path>` 时临时覆盖 download_dir，否则用 config 值。
 
 ## 依赖检查
 
-首次运行或命令失败时，检查三个工具的可用性：
+首次运行或命令失败时检查工具可用性（或运行 `scripts/check_env.sh` 一键检查）：
 
 ```bash
-command -v yt-dlp >/dev/null 2>&1 && echo "yt-dlp OK"
-command -v gallery-dl >/dev/null 2>&1 && echo "gallery-dl OK"
-command -v ffmpeg >/dev/null 2>&1 && echo "ffmpeg OK"
+command -v yt-dlp gallery-dl ffmpeg
+# Windows (PowerShell): Get-Command yt-dlp, gallery-dl, ffmpeg -ErrorAction SilentlyContinue
 ```
 
-也支持使用技能附带的 `scripts/check_env.sh` 脚本一键检查（输出更详细的环境信息）。
-
-缺失时提示用户安装。安装方式按平台：
+缺失时按平台安装：
 
 **macOS：**
 ```bash
 brew install yt-dlp gallery-dl ffmpeg
 ```
 
-**Windows（任选其一）：**
+**Windows（任选）：**
 ```powershell
-# winget（推荐）
-winget install yt-dlp.yt-dlp
-winget install Gyan.FFmpeg
-
-# scoop
-scoop install yt-dlp gallery-dl ffmpeg
-
-# pip
-pip install yt-dlp gallery-dl
+winget install yt-dlp.yt-dlp Gyan.FFmpeg   # 或 scoop install yt-dlp gallery-dl ffmpeg；或 pip install yt-dlp gallery-dl
 ```
 
-Windows 依赖检查（PowerShell）：
-```powershell
-Get-Command yt-dlp, gallery-dl, ffmpeg -ErrorAction SilentlyContinue
+**Linux：**
+```bash
+sudo apt install yt-dlp ffmpeg && pipx install gallery-dl   # 或按发行版包管理器
 ```
 
 ### 工具自动更新
 
-yt-dlp 需频繁更新以对抗平台反爬，gallery-dl 同理。为避免每次运行都检查更新带来的等待，采用**按天间隔检查**策略：
+yt-dlp/gallery-dl 需频繁更新以对抗反爬。**按天间隔检查**（`config.json` 的 `last_update_check` + `update_interval_days`，默认 7）：
 
-- `config.json` 记录 `last_update_check`（上次检查日期）与 `update_interval_days`（默认 7 天）
-- 每次技能运行时读取 config：
-  ```
-  if 距 last_update_check 已超过 update_interval_days 天:
-      执行一次自动更新并更新 last_update_check
-  else:
-      跳过（零开销）
-  ```
-- 自动更新命令（macOS / Windows 通用）：
-  ```bash
-  yt-dlp -U && gallery-dl --update
-  ```
-  若 yt-dlp 报"由包管理器管理"（brew 安装），改用：
-  ```bash
-  brew upgrade yt-dlp gallery-dl    # macOS
-  # 或 pip install -U yt-dlp gallery-dl（Windows/pip 安装）
-  ```
-- 例外：若某次下载报"版本过旧/请更新"错误，无视间隔立即更新。
+```
+if 距 last_update_check 超过 update_interval_days 天:
+    执行一次自动更新并更新 last_update_check
+else: 跳过（零开销）
+```
+
+```bash
+yt-dlp -U && gallery-dl --update          # brew 安装报"包管理器管理"则改用 brew upgrade yt-dlp gallery-dl
+cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt
+cd /tmp/parse-video-py && git pull && pip install -r requirements.txt
+```
+
+- **更新失败静默降级**：自动更新失败不阻断下载，用现有版本继续，等下次间隔再试
+- 例外：下载报"版本过旧/请更新"时无视间隔立即更新
 
 ### XHS-Downloader（小红书必需）
 
-[XHS-Downloader](https://github.com/JoeanAmier/XHS-Downloader) 是小红书图文/视频下载的社区标准工具，支持无水印下载。
-
-**安装方式 A：Git 克隆（推荐，保持最新反爬兼容性）**
+[GitHub](https://github.com/JoeanAmier/XHS-Downloader) 小红书图文/视频无水印下载。
 
 ```bash
 git clone https://github.com/JoeanAmier/XHS-Downloader.git /tmp/xhs-downloader
 pip install -r /tmp/xhs-downloader/requirements.txt
-```
-
-**安装方式 B：已安装则更新**
-
-```bash
-cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt
-```
-
-**验证：**
-
-```bash
-python /tmp/xhs-downloader/main.py --help 2>&1 | grep -q "usage" && echo "XHS-Downloader OK"
+python /tmp/xhs-downloader/main.py --help 2>&1 | grep -q "usage" && echo "OK"   # 验证
+# 已安装则更新：cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt
 ```
 
 ### parse-video-py（抖音无水印必需）
 
-[parse-video-py](https://github.com/wujunwei928/parse-video-py) 是多平台无水印视频解析库，支持抖音、小红书、快手、微博、Bilibili 等 20+ 平台。
-
-**安装方式 A：Git 克隆**
+[GitHub](https://github.com/wujunwei928/parse-video-py) 多平台无水印视频解析（抖音/小红书/快手/微博/B 站等 20+）。
 
 ```bash
 git clone https://github.com/wujunwei928/parse-video-py.git /tmp/parse-video-py
 cd /tmp/parse-video-py && pip install -r requirements.txt
-```
-
-**安装方式 B：已安装则更新**
-
-```bash
-cd /tmp/parse-video-py && git pull && pip install -r requirements.txt
-```
-
-**验证：**
-
-```bash
-python -c "import httpx, fastapi; print('parse-video-py deps OK')" 2>&1 && echo "OK"
+python -c "import httpx, fastapi" && echo "OK"   # 验证
+# 已安装则更新：cd /tmp/parse-video-py && git pull && pip install -r requirements.txt
 ```
 
 ### curl_cffi（Bilibili 必需）
 
-yt-dlp 的 `--impersonate chrome` 需要 [curl_cffi](https://github.com/yifeikong/curl_cffi) 库。Homebrew/winget/scoop 安装的 yt-dlp **不包含** curl_cffi，需额外安装：
+`--impersonate chrome` 依赖 [curl_cffi](https://github.com/yifeikong/curl_cffi)，Homebrew/winget/scoop 装的 yt-dlp 不含它：
 
-**macOS：**
 ```bash
-pip3 install --break-system-packages curl_cffi
-```
-
-**Windows：**
-```powershell
-pip install curl_cffi
-```
-
-**验证（跨平台）：**
-```bash
-yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"
+pip3 install --break-system-packages curl_cffi          # macOS；Windows 用 pip install curl_cffi
+yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"   # 验证
 ```
 
 ## Cookies 获取引导
 
-🔴 **CHECKPOINT**：cookies 不再自动从浏览器提取，由**用户通过 Get cookies.txt LOCALLY 浏览器扩展**导出各平台 cookies 文件，上传并保留在本地。技能只在**下载失效或高画质被锁定**时提示用户更新。
+🔴 **CHECKPOINT**：cookies **优先从真实浏览器登录态直取**（browser-harness 连用户已登录的 Dia/Chrome），拿不到才用扩展导出，统一持久化为 cookies 文件复用。
 
-### cookies 文件约定
+**优先级**：
+1. browser-harness 连用户真实浏览器 → `cdp("Network.getAllCookies")` 导出全部 cookie（含 HttpOnly/Secure），转 Netscape 写 `<cookies_dir>/<平台>.txt`
+2. 目标平台未登录 → 引导用户在浏览器登录（或提示用 Get cookies.txt LOCALLY 扩展导出），存 `<cookies_dir>/<平台>.txt`
+3. 留档复用；只在下载失效或高画质被锁定时提示更新
 
-- 每平台一个文件，放在 `config.json` 的 `cookies_dir` 目录，命名为 `<平台>.txt`
-- 支持：`youtube.txt`、`bilibili.txt`、`vimeo.txt`、`artstation.txt` 等（按 URL 域名匹配）
-- 文件首行须为 `# Netscape HTTP Cookie File`（Get cookies.txt LOCALLY 导出的标准格式）
+**文件约定**：每平台一文件，按 URL 域名匹配（`youtube.txt`/`bilibili.txt`/`vimeo.txt`/`artstation.txt`…），首行须为 `# Netscape HTTP Cookie File`。
 
-### 导出并上传（用户操作）
+**从真实浏览器提取（browser-harness）**：
+1. 确保 browser-harness 已连上用户浏览器（见「browser-harness 检查」），确认目标平台已登录
+2. 导出全部 cookie 存文件（CDP `Network.getAllCookies`，含 HttpOnly/Secure）：
+   ```python
+   import json
+   cookies = cdp("Network.getAllCookies")
+   json.dump(cookies["cookies"], open("/tmp/cookies.json", "w"))
+   ```
+3. 转 Netscape（按域过滤）：`python3 scripts/storage_state_to_netscape.py /tmp/cookies.json -o <cookies_dir>/<平台>.txt --domain <域名>`
+4. 验证首行为 `# Netscape HTTP Cookie File`
 
-```
-1. 用浏览器登录目标平台
-2. 安装 Get cookies.txt LOCALLY 扩展，点击图标 → Export，导出 cookies.txt
-3. 将文件保存到 <cookies_dir>/<平台>.txt
-```
+> 转换脚本 `<SKILL_DIR>/scripts/storage_state_to_netscape.py` 同时接受 Playwright storageState 格式（`{"cookies":[...]}`）和 CDP cookie 数组（`[{...}]`）两种输入，自动检测。CDP 的 `expires` 是浮点秒、session cookie 为 -1（yt-dlp 会跳过但无关紧要），`domain` 以 `.` 开头即 domain cookie。实测：Dia 导出 3521 个真实 cookie（含 YouTube/B 站/小红书等已登录态），B 站 `SESSDATA`（HttpOnly）转换后 yt-dlp 正常拿到高画质格式列表。
 
-导出后 cookies 文件长期保留本地复用。
+**导出并上传（降级方案，用户操作）**：浏览器登录 → 装 Get cookies.txt LOCALLY 扩展 → Export → 保存到 `<cookies_dir>/<平台>.txt`，长期保留本地复用。
 
-### 技能使用
+**技能使用**：下载时按 URL 判断平台 → 找 `<cookies_dir>/<平台>.txt`，存在则 yt-dlp/gallery-dl 加 `--cookies`，否则以公开内容最高画质下载。
 
-```
-下载时按 URL 判断平台 → 找 <cookies_dir>/<平台>.txt
-if 文件存在:
-    yt-dlp/gallery-dl 加 --cookies <cookies_dir>/<平台>.txt
-else:
-    无 cookies，直接以公开内容最高画质下载
-```
-
-### 平台 Cookies 失效处理
-
-🔴 **CHECKPOINT**：仅当满足以下任一条件时才提示用户更新 cookies：
-1. `-F` 显示高画质格式被锁定（如 Bilibili "you have to become a premium member"、YouTube 年龄限制、Vimeo OAuth 401）
-2. 下载报登录/权限错误
-
-用 `question` 询问：
+**失效处理**：仅当 `-F` 显示高画质被锁定（Bilibili "premium member"、YouTube 年龄限制、Vimeo OAuth 401）或下载报登录/权限错误时，用 `question` 询问：
 
 ```
 检测到高画质需登录或下载失效，请更新 <平台> 的 cookies。
-□ 已更新，重新导出并覆盖 cookies_dir/<平台>.txt 后重试
+□ 已更新，重新从浏览器登录态导出覆盖 cookies_dir/<平台>.txt 后重试
 □ 跳过，用当前可用画质下载
 ```
 
-- 选择"已更新" → 引导用户重新用 Get cookies.txt LOCALLY 导出覆盖该文件 → 重试
-- 再次失败 → 提示"登录未生效，账号可能缺少该内容的购买权限或访问权限"，继续用低画质下载
-- 选择"跳过" → 直接以公开内容可用的最高画质下载
+- "已更新" → 优先浏览器重拉登录态覆盖（见上），否则引导重新导出覆盖 → 重试；再失败 → 提示"登录未生效，账号可能缺少该内容的购买权限或访问权限"，低画质下载
+- "跳过" → 直接以公开内容最高画质下载
 
 ## 执行规范
 
-所有下载命令优先检查环境是否提供 `bash_stream` 工具（支持流式进度推送，参数同 `bash`）：
-
-```
-if agent has tool "bash_stream":
-    用 bash_stream 执行下载命令（实时显示进度条）
-else:
-    用 bash 执行下载命令（完整输出兜底）
-```
-
-`bash_stream` 和 `bash` 的命令参数完全一致（command、timeout、workdir），只需切换工具名。
+下载命令优先用 `bash_stream`（流式进度，参数同 `bash`）；无此工具用 `bash` 兜底。
 
 ## 浏览器访问约定
 
-所有需要浏览器访问的操作（页面爬取、登录引导、验证内容等）**一律默认调用 BrowserClaw**（用户的代理浏览器，已登录各平台账号）。**不要**退回到 curl 直接抓取或让用户手动操作。
+浏览器类操作（爬取、登录引导、验证）统一用 **browser-harness**（直连用户真实浏览器），按优先级降级：
 
 ```
-if 环境提供 BrowserClaw 工具:
-    用 BrowserClaw 打开页面并操作（tabs / navigate / snapshot / act / evaluate）
-else:
-    提示用户安装 BrowserClaw（macOS 或 Windows 均有对应安装方式），安装后重试
+1. 能 HTTP 直连抓取（无 JS challenge/登录要求）→ curl 抓 HTML + Python/正则解析，零浏览器依赖
+   （如 therookies 结果页 /contests/{id}/results、ArtStation 页面，curl 即可拿完整 HTML）
+2. 必须真实浏览器（JS/Cloudflare/登录，如 therookies 的 entry 页 /entries/{id}）→
+   browser-harness 直连用户真实浏览器（自带登录态，天然过 Cloudflare）：
+   - new_tab(url) / goto_url(url)        导航（首次导航用 new_tab）
+   - wait_for_load()                     等页面加载
+   - js("...")                           页内跑 JS（Runtime.evaluate，支持 async/await、非法 return 自动包装）
+   - cdp("Domain.method", **params)      原始 CDP（Network.getAllCookies 等）
+   - page_info()                         当前页 {url,title,viewport}
+   - click_at_xy(x,y) / fill_input()     交互（AX 树取坐标，见 SKILL.md 头部）
+   - capture_screenshot()                截图核对
+- list_tabs() / switch_tab()          多标签页
+    - close_tab(target=...)              关闭指定标签页（传 targetId）
+    - new_tab(url)                        返回新标签页的 targetId
+    调用方式：bash 跑 heredoc
+     BU_CDP_WS="ws://127.0.0.1:9222/devtools/browser" browser-harness <<'PY'
+     print(page_info())
+     PY
+   不要默认退回 curl 或让用户手动操作
 ```
+
+**调用规范**：
+- 每次浏览器操作先确认 CDP 端点：`cdp_url` 存于 config.json（Dia 默认 `ws://127.0.0.1:9222/devtools/browser`），作为 `BU_CDP_WS` 环境变量传给 `browser-harness`
+- `js(expression)` 直接执行字符串表达式；表达式里有非法顶层 `return` 时自动包函数重试（与 rookies min.js 兼容，见实测）
+- 导航后 `wait_for_load()`；SPA 异步渲染用 `wait_for_element(selector)` 等元素出现
+- 多行 heredoc 结尾必须是独立的 `PY`（顶格），bash 执行
+
+**标签页清理约定**：使用 browser-harness 批量解析页面时，必须管理临时标签页，避免污染用户浏览器：
+1. 解析前 `list_tabs()` 快照现有标签页的 targetId 集合
+2. 每次 `new_tab(url)` 记录返回的 targetId
+3. 解析完成后对每个记录的 targetId 执行 `close_tab(target=targetId)`，只关闭本次打开的新标签页，不碰用户原有标签
+
+```python
+before = {t['targetId'] for t in list_tabs()}
+tracked = []
+for eid in entries:
+    tid = new_tab(f"https://.../entries/{eid}")
+    tracked.append(tid)
+    # ... 解析逻辑 ...
+for tid in tracked:
+    close_tab(target=tid)
+```
+
+**Cloudflare**：browser-harness 连**用户真实浏览器**，已登录站点**天然过 CF**（实测 therookies entry 页无 "Just a moment…"）。仅当目标站需登录但浏览器未登录时，引导用户先登录再操作。
+
+> **注意**：browser-harness 用你的真实浏览器 = 你的真实登录态 + 你的 IP。下载素材时的敏感操作（如登录墙、付款、下载有版权的私有内容）会真实发生在你浏览器里，涉及此场景先和用户确认。
+
+### 标题标准化函数（所有平台通用）
+
+下载的**文件夹/文件名必须与网页标题一致，禁止把空格替换成 `-`**。统一用 `sanitize_title`：
+
+```python
+def sanitize_title(t):
+    t = re.sub(r'[\\/:*?"<>|]', '-', t)   # 只替换文件系统非法字符，保留空格
+    t = re.sub(r'\s+', ' ', t).strip()
+    t = re.sub(r'-{2,}', '-', t).strip('-. ')
+    return t
+```
+
+命名直接用标题原文，单文件后追加 `_序号`。
 
 ## 核心路由逻辑
 
@@ -305,450 +294,255 @@ else:
 
 ### 1. 时间节点检测
 
-检查 URL 后面是否跟了时间范围（空格分隔）：
-
-| 示例 | 含义 |
-|------|------|
-| `URL 10:30-15:00` | 下载 10:30 到 15:00 |
-| `URL 1:20:30-1:45:00` | 含小时的格式 |
-| `URL 10:30` | 从 10:30 下载到结尾 |
-| `URL 10:30-` | 同上，从 10:30 到结尾 |
-
-匹配到时间范围后：
-- 首先检查 `command -v ffmpeg`（`--download-sections` 依赖 ffmpeg）
-- 用 `--download-sections "*START-END"` 参数
-- 可以叠加多个区间：`--download-sections "*10:15-15:00" --download-sections "*30:00-35:00"`
+URL 后跟时间范围（空格分隔）则切片下载：`URL 10:30-15:00`（区间）、`URL 1:20:30-1:45:00`（含小时）、`URL 10:30` / `URL 10:30-`（到结尾）、`URL 10:15-inf`（到末尾，负时间戳从结尾算）。**多区间重复传参**：`--download-sections "*10:30-15:00" --download-sections "*16:00-16:30"`。先 `command -v ffmpeg` 检查（依赖 ffmpeg）。切片输出自动加 `[起点-终点]` 后缀（如 `xxx [00-12-30-00-15-45].mp4`），不会覆盖完整版；区间超出时长自动截断到可用部分，不报错。
 
 ### 2. 站点路由
 
-从 URL 判断站点：
-
-```
-URL 包含 "artstation.com" 或 "artstation.cn"
-  → gallery-dl（见 ArtStation 专用逻辑）
-
-URL 包含 "bilibili.com" 或 "b23.tv"
-  → yt-dlp（见 Bilibili 专用逻辑）
-
-URL 包含 "youtube.com"、"youtu.be"、"m.youtube.com"
-  → yt-dlp（见 清晰度选择 + cookies）
-
-URL 包含 "vimeo.com"
-  → yt-dlp（见 Vimeo 专用逻辑）
-
-URL 包含 "xiaohongshu.com" 或 "xhslink.com" 或 "rednote.com"
-  → XHS-Downloader（见 小红书专用逻辑）
-
-URL 包含 "douyin.com" 或 "v.douyin.com"
-  → parse-video-py（见 抖音无水印专用逻辑）
-
-URL 包含 "therookies.co/contests" 或 "therookies.co/entries"
-  → TheRookies 专用流程（见 TheRookies 专用处理）
-
-其他
-  → yt-dlp 通用下载
-```
+从 URL 判断站点 → 对应专用处理（优先看本站点「专用处理」章节，否则通用）：
+- `artstation.com/.cn` → gallery-dl
+- `bilibili.com`/`b23.tv` → yt-dlp（Bilibili 专用）
+- `youtube.com`/`youtu.be`/`m.youtube.com` → yt-dlp
+- `vimeo.com` → yt-dlp（Vimeo 专用，被 Turnstile 挡时用 JWT 方案）
+- `xiaohongshu.com`/`xhslink.com`/`rednote.com` → XHS-Downloader
+- `douyin.com`/`v.douyin.com` → parse-video-py
+- `therookies.co/contests`/`therookies.co/entries` → TheRookies 专用流程
+- 其他 → yt-dlp 通用下载
 
 ## ArtStation 专用处理
 
 URL 示例：`https://www.artstation.com/artwork/Ov6Zwb`
 
-### 下载命令
-
 ```bash
 gallery-dl -d "<DOWNLOAD_DIR>" -f "{title}_{num:02d}.{extension}" "<URL>"
 ```
 
-**格式说明**：gallery-dl 使用 `{field}` 格式（Python str.format 风格），不是 `%(field)s`。
-嵌套字段用 `{dict[key]}` 语法。
-
-### 文件结构
-
-默认目录模板为 `{category}/{user[username]}/`，所以下载后结构是：
-
-```
-{download_dir}/
-└── artstation/
-    └── {username}/
-        └── {project_title}_01.{ext}
-        └── {project_title}_02.{ext}
-        └── ...
-```
-
-### 调试字段
-
-如果文件名不符合预期，先用以下命令查看可用元数据字段：
-
-```bash
-gallery-dl -K "<URL>"      # 列出所有可用字段及示例值
-gallery-dl --print '{user[username]}' --print '{title}' "<URL>"  # 查看具体字段值
-```
-
-然后用实际字段名调整 `-f` 模板。
-
-### 目录结构自定义
-
-如果不想保留 `artstation/` 类别前缀，可以先查看可用字段后用 `-o "directory={field}"` 自定义：
-
-```bash
-# 仅使用用户名作为上级目录
-gallery-dl -d "<DOWNLOAD_DIR>" -o "directory={user[username]}" -f "{title}_{num:02d}.{extension}" "<URL>"
-```
+- gallery-dl 用 `{field}` 格式（Python str.format 风格），不是 `%(field)s`；嵌套字段用 `{dict[key]}`
+- 默认目录结构 `{category}/{user[username]}/`：`{download_dir}/artstation/{username}/{title}_01.ext`
+- 文件名不符预期时：`gallery-dl -K "<URL>"` 列出可用字段，`gallery-dl --print '{user[username]}' --print '{title}' "<URL>"` 查具体值
+- 不要 `artstation/` 前缀：`gallery-dl -d "<DOWNLOAD_DIR>" -o "directory={user[username]}" -f "{title}_{num:02d}.{extension}" "<URL>"`
 
 ## Bilibili 专用处理
 
-### 执行步骤
-
-**Step 1：获取 cookies**
-
-读取 `<cookies_dir>/bilibili.txt`（见 Cookies 获取引导）。无该文件或未登录大会员时，按平台 Cookies 失效处理引导用户更新。
-
-**Step 2：列出可用格式**
-
-```bash
-yt-dlp --impersonate chrome "$URL" -F
-```
-
-从输出检查高画质格式是否锁定。如果大会员内容未登录，按平台 Cookies 失效处理。
-
-**Step 3：下载视频**
+1. **获取 cookies**：读 `<cookies_dir>/bilibili.txt`（见 Cookies 引导）；无该文件或未登录大会员则按失效处理
+2. **列出格式**：`yt-dlp --impersonate chrome "$URL" -F`，检查高画质是否锁定
+3. **下载**：
 
 ```bash
 yt-dlp --impersonate chrome \
   --add-header "Origin:https://www.bilibili.com" \
   --add-header "Referer:https://www.bilibili.com" \
-  -P "<DOWNLOAD_DIR>" \
-  -o "%(title)s.%(ext)s" \
-  -S "res:1080" \
-  "<URL>"
+  -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"
 ```
 
-注意 Bilibili 的 AV1 编码格式（format ID 以 100 开头）在某些网络环境下连接超时。如遇超时，换用 AVC/h264 格式（format ID 以 300xx 开头）或指定低分辨率。
+AV1 格式（ID 100xxx）可能连接超时，换 AVC/h264（300xx）或降分辨率。
 
 ## YouTube 专用处理
 
-### 执行步骤
-
-**Step 1：获取 cookies（可选）**
-
-公开视频不需要 cookies。仅年龄限制和已购内容需要：读取 `<cookies_dir>/youtube.txt`（见 Cookies 获取引导）。
-
-**Step 2：列出格式并选择清晰度**
-
-```bash
-yt-dlp -F "<URL>"
-```
-
-见下方清晰度选择策略——若存在 >1080p 选项，询问用户选择。
-
-**Step 3：下载视频**
-
-```bash
-yt-dlp -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"
-```
+1. 公开视频无需 cookies；仅年龄限制/已购内容需读 `<cookies_dir>/youtube.txt`
+2. `yt-dlp -F "<URL>"` 列格式；>1080p 选项按清晰度策略询问
+3. `yt-dlp -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"`
+4. 需 cookies 时加 `--cookies <cookies_dir>/youtube.txt`
+5. 403 时加 `--impersonate chrome --cookies <cookies_dir>/youtube.txt`（实测能解决）
 
 ## Vimeo 专用处理
 
-🔴 **CHECKPOINT**：Vimeo 下载必须登录（web 客户端）。未登录时 yt-dlp 报 `Failed to fetch macos OAuth token: HTTP Error 401`（上游 bug #17271）。**检测到未登录时不要降级，用 `question` 要求用户更新 `cookies_dir/vimeo.txt` 后重试**。
+🔴 **CHECKPOINT**：Vimeo 网页版被 Cloudflare Turnstile 人机验证挡住 player.vimeo.com，**yt-dlp/curl 直接访问全被 401/403**（`Unable to download webpage: HTTP Error 401`），`--impersonate chrome --cookies` 无效（Turnstile 是 CF 层，非登录问题）。**不要无限重试 yt-dlp**，检测到 401/403 直接转 JWT 方案。
 
-**Step 1：获取 cookies**（Vimeo 必需）
-
-读取 `<cookies_dir>/vimeo.txt`（见 Cookies 获取引导）。未登录则按平台 Cookies 失效处理引导用户更新。
-
-**Step 2：列出格式并选择清晰度**
+**方案一：JWT 方案（被 Turnstile 挡时主用，泛平台）**
+登录用户的 Vimeo 视频页内嵌 `__NEXT_DATA__` 里有 `viewerBootstrap.jwt`（网页登录 token，约 1 小时有效）。用它对 `api.vimeo.com`（不走 Turnstile）拿签名文件 URL 下载：
 
 ```bash
-yt-dlp --cookies <cookies_dir>/vimeo.txt --extractor-args "vimeo:client=web" -F "<URL>"
+# 1. 浏览器打开视频页提取 JWT（browser-harness 直连用户真实浏览器，自带登录态）：
+#    BU_CDP_WS="ws://127.0.0.1:9222/devtools/browser" browser-harness <<'PY'
+#    new_tab("https://vimeo.com/<id>")
+#    wait_for_load()
+#    jwt = js("JSON.parse(document.getElementById('__NEXT_DATA__').textContent).props.pageProps.viewerBootstrap.jwt")
+#    print(jwt)
+#    PY
+#    # 或把页面 HTML 存文件用脚本提取：--html
+
+# 2. 下载（选 ≤1080p；>1080p 按清晰度策略询问后改 --height）：
+python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" -o "<输出.mp4>"
+python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" --list   # 列清晰度
 ```
 
-若报 `Failed to fetch macos OAuth token` → 提示用户更新 vimeo cookies 文件。见下方清晰度选择策略。
+- `scripts/vimeo_jwt_dl.py` 支持 `--jwt <token>` 或 `--html <页面HTML文件>` 自动提取
+- 实测：`Authorization: jwt <JWT>` 调 `api.vimeo.com/videos/{id}?fields=name,uri,privacy,files` 返回签名文件 URL（uhd/hd/sd 多档），curl 直接下载成功（1080p 40MB）
+- JWT 过期（约 1h）重新提取即可
+- **公开视频也可先试 yt-dlp**（部分视频 yt-dlp 能直接过，见方案二）；被 Turnstile 挡才转 JWT
 
-**Step 3：下载视频**
+**方案二：yt-dlp（公开视频快速通道，未被 Turnstile 挡时）**
 
 ```bash
-yt-dlp --cookies <cookies_dir>/vimeo.txt --extractor-args "vimeo:client=web" -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"
+yt-dlp --cookies <cookies_dir>/vimeo.txt --impersonate chrome --extractor-args "vimeo:client=web" -F "<URL>"   # 列格式
+yt-dlp --cookies <cookies_dir>/vimeo.txt --impersonate chrome --extractor-args "vimeo:client=web" -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"
 ```
+
+密码锁定的 Vimeo（oEmbed `title: null`）跳过，除非页面给了密码用 `--video-password "<密码>"`。
 
 ## TheRookies 专用处理
 
 URL 示例：`https://www.therookies.co/contests/549/results`
 
-TheRookies 是 Rookie Awards 作品竞赛站，一个 **results 页面收录一场比赛的全部入围作品**，每个作品页（`/entries/{id}`）内可能以以下任一形式嵌入视频：
+Rookie Awards 竞赛站。一个 **results 页面收录一场比赛的全部入围作品**，每个作品页（`/entries/{id}`）内可能嵌入：① YouTube/Vimeo iframe；② 原生 `<video>` 直链（S3 `rookies-production.s3-accelerate.amazonaws.com` mp4）；③ 指向其他 `/entries/{id}` 的超链接（如 "Click here to see the full movie post"，跳转后才是完整影片）；④ 只有图片（CloudFront）。
 
-- iframe 嵌入的 YouTube/Vimeo 视频
-- 原生 `<video>` 元素直链（S3 `rookies-production.s3-accelerate.amazonaws.com` mp4）
-- 页面内指向其他 `/entries/{id}` 的超链接（如 "Click here to see the full movie post"），跳转后才是完整影片
-- 只有图片（CloudFront）
+**流程分两层：先爬取清单，再按清单逐个下载**。爬取以视频为主、始终提取图片（用于 DIFF 表格一目了然）；**下载时视频优先——有视频的作品只下视频不下图，仅纯图片作品才下图片**。
 
-因此下载流程分两层：**先爬取清单，再按清单逐个下载**。爬取时**以视频为主**：有视频（含原生 video、iframe、关联影片帖）优先列视频；真正只有图片的作品才提取图片。
+**完整工作流**：
+1. curl 直连 results 页拿完整 SSR HTML（无 JS challenge）→ Python/正则解析比赛名 + 全部 entry 链接
+2. 快照当前浏览器标签页列表（`list_tabs()`）；逐作品用 browser-harness 打开 entry 页 `js()` 解析：YouTube/Vimeo iframe、原生 video 直链、关联影片 entry 的视频、全部 CloudFront 图片；追踪每个 `new_tab()` 返回的 targetId
+3. 关闭所有追踪的临时标签页（`close_tab(target=targetId)`），不碰用户原有标签
+4. 对每个 entry 的视频批量 fetch oEmbed 标题，`classify()` 分类为 main/breakdown/locked/other
+5. 整理 DIFF 表格（四列分类 + 图片列）在对话呈现，交用户挑
+6. 按选择逐作品建目录并下载
 
-### 完整工作流
+**页面访问分层**（见「浏览器访问约定」）：results 页 → curl 直连；entry 页 → browser-harness 直连用户真实浏览器（实测 Dia 无 Cloudflare 拦截）。
 
-```
-1. 用 BrowserClaw 打开 results 页面（作为爬取 context）
-2. 在页面 evaluate 中提取比赛名 + 全部 entry 链接（见下方脚本）
-3. 批量 fetch 每个 entry 的 HTML，解析出每作品的资源清单（YouTube/Vimeo iframe、原生 video 直链、关联影片 entry 的视频，真正无视频的提取图片）
-4. 将解析结果整理为 DIFF 表格（见下方表格格式），在对话中呈现，交用户判断下载哪些
-5. 按表格选择，逐作品建立目录并下载
-```
-
-### 前提
-
-🔴 **CHECKPOINT**：本流程强制使用 BrowserClaw（网站有 JS challenge，curl 直接抓只返回 5.6KB 拦截页；但在浏览器页内 `fetch` 同源页面可拿到完整服务端渲染 HTML）。在 results 页面 evaluate 中批量爬取，无需逐作品导航。
+> 实测：`/contests/{id}/results` 用 curl 直连返回完整 SSR HTML（含全部作品）；`/entries/{id}` 有 Cloudflare challenge，但 browser-harness 连用户真实浏览器（Dia 9222）**直接放行**（无 "Just a moment…"）。标题实证（entry 48448）：`og:title` = `The Rookies - 3D Character Art | 2026 | Milla Khimich, by mimsculpt`，页面 `h1` = `3D Character Art | 2026 | Milla Khimich`。**作品标题本身就含作者/年份**，parseEntry 剥 `The Rookies - ` 前缀和 `, by 用户名` 后 = 页面 h1，无需再剥作者（属标题本体）。browser-harness 的 `js()` 跑 `references/therookies-entry.min.js` 直接返回完整解析结果（异步 min.js 与 illegal-return 自动包装兼容）。
 
 ### 单项目下载（直接给 entry 链接时）
 
-用户直接给出 `https://www.therookies.co/entries/{id}`（不经 results 页）时，无需比赛名，直接在该 entry 页执行解析：
+用户给 `https://www.therookies.co/entries/{id}`（不经 results 页）时，无需比赛名：
+1. browser-harness 打开 entry 链接；页内 `js()` 直接取 `document`（无需 fetch）：`parseEntry` 取 `og:title` → 标题/作者，`.project-content` 内全部 `iframe` + 原生 `<video>` → 视频，查指向其他 `/entries/` 的关联影片帖，同时取全部 `img` → 图片（尺寸段换 3840xAUTO）。再 `oEmbedTitle()` 补标题、`classify()` 分 `main`/`breakdown`/`locked`/`other`
+2. 对话呈现（成片/衍生分列、有图列图数）交用户确认
+3. 建 `{作品标题}` 目录（parseEntry 干净 og:title = 页面 h1），按「步骤 3：下载」——**只下成片，无成片才降级衍生，locked 跳过**；有视频只下视频不下图，纯图作品才下图片；单类型素材直接放主目录，仅用户显式要求连图一起下载才分 `Video/`、`Images/`
 
-1. BrowserClaw 打开该 entry 链接（作为 context）
-2. 页内 evaluate 解析当前页面（直接取 `document`，无需 fetch）：用下方 `parseEntry` 逻辑取 `og:title` → 标题/作者，取 `.project-content` 内全部 `iframe` + 原生 `<video>` → 视频清单，检查是否有指向其他 `/entries/` 的关联影片帖链接；仅当这些都无视频时取 `.project-content` 内 `img` → 图片清单（尺寸段替换 3840xAUTO）。最后用 `oEmbedTitle()` 补每条视频真实标题、`classify()` 分类成片（`main`/`breakdown`/`locked`/`other`）
-3. 对话中呈现该作品资源（**成片/衍生分列**、纯图列图片数），交用户确认
-4. 建目录 `{作品标题} by {作者}/Video`（有视频）或 `/Images`（纯图片），按「步骤 3：下载」下载——**只下载成片，无成片才降级衍生，locked 跳过**
+### 步骤 1：curl 抓取 results 页并提取比赛名 + entry 链接
 
-### 步骤 1：提取比赛名 + entry 链接
-
-在 results 页面的 BrowserClaw evaluate 中运行：
-
-```js
-const h3s = [...document.querySelectorAll('h3')]
-  .map(e => e.innerText.trim().replace(/\s+/g, ' '))
-  .find(t => t.startsWith('Finalists '));
-const contestTitle = h3s.replace(/^Finalists\s+/, '');  // 例: "Rookie of the Year | 3D Animation"
-
-const links = []; const seen = new Set();
-document.querySelectorAll('main a').forEach(a => {
-  const h3 = a.querySelector('h3');
-  if (h3) {
-    const h = a.href;
-    if (/therookies\.co\/entries\/\d+/.test(h) && !seen.has(h)) {
-      seen.add(h);
-      links.push({ title: h3.innerText.trim(), url: h });
-    }
-  }
-});
-return { contestTitle, count: links.length, links };
+```bash
+curl -sL -A "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" \
+  "https://www.therookies.co/contests/{id}/results" -o /tmp/rk_results.html
 ```
 
-注意 h3 文本可能含换行符，必须先 normalize 空白再剥 `Finalists ` 前缀。
+解析（顶栏标题即比赛名；`id="finalists"` 区块下每个 `.cardProject` 是一个作品）：
 
-### 步骤 2：批量爬取并解析每个 entry
-
-同一页面 evaluate 中运行（页内 fetch 同源、携带 cookies）。`parseEntry` 需接收当前 entry 的 id（用于过滤指向自身页面的关联链接）：
-
-```js
-async function rkFetch(url) {
-  const r = await fetch(url, { credentials: 'include' });
-  return r.ok ? await r.text() : null;
-}
-// oEmbed 获取视频真实标题（CORS 已验证可行）。YouTube 用 youtube.com/oembed，Vimeo 用 vimeo.com/api/oembed.json。
-// Vimeo 密码保护视频 oEmbed 返回 title:null → 判定为"密码锁定"（locked），下载阶段跳过。
-async function oEmbedTitle(v) {
-  if (v.host !== 'youtube' && v.host !== 'vimeo') return null;   // 原生 S3 直链无 oEmbed
-  const o = v.host === 'youtube'
-    ? 'https://www.youtube.com/oembed?url=' + encodeURIComponent(v.url) + '&format=json'
-    : 'https://vimeo.com/api/oembed.json?url=' + encodeURIComponent(v.url);
-  try {
-    const r = await fetch(o);
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d.title || null;
-  } catch (e) { return null; }
-}
-// 成片分类：'main' = 作品成片（优先下载）；'breakdown' = making-of/breakdown/showcase 等衍生内容（仅无成片时降级下载）；'locked' = Vimeo 密码锁定（跳过）；'other' = 无法归类（当 secondary）
-// 衍生特征词表（contest 561 全 42 作品验证）：须同时覆盖复数、下划线/连字符、驼峰、缩写
-// （characters / _Turn_ / TurnTable / MOF=MakingOf / Brkd / lookDev / firstshot_blocking），全部用词边界断言匹配
-const BREAKDOWN_WORDS = [
-  'brkd', 'breakdown', 'breakdowns', 'making', 'mof', 'bts', 'wip', 'showcase', 'showcases',
-  'progression', 'process', 'processes', 'progress', 'turnaround', 'turnarounds', 'turntable',
-  'turntables', 'turn', 'lookdev', 'lookdevs', 'reel', 'reels', 'rig', 'rigs', 'rigging',
-  'rigg', 'test', 'tests', 'testing', 'shot', 'shots', 'character', 'characters', 'environment',
-  'environments', 'render', 'renders', 'rendering', 'compositing', 'comp', 'fx', 'lighting',
-  'blocking', 'block', 'blocks', 'demo', 'demos', 'comparison', 'quad', 'orchestra', 'layout',
-  'layouts', 'pipeline', 'cfx', 'procedural', 'blendshape', 'blendshapes', 'expression',
-  'expressions', 'cycle', 'simulation', 'simulations', 'hair', 'clothes', 'cloth', 'frame',
-  'frames', 'storyboard', 'blockout'
-];
-function classify(video, workTitle) {
-  if (video.host === 'direct') return 'other';                    // 原生 S3 直链无标题，当兜底
-  const t = (video.title || '').toLowerCase();
-  const w = (workTitle || '').toLowerCase();
-  if (!t) return 'locked';                       // oEmbed 无标题 → Vimeo 密码保护
-  // 标题先归一化：非字母数字 → 空格，使 "_MOF_"、"-turn-"、驼峰 "lookDev" 也能按词命中
-  const tn = t.replace(/[^a-z0-9]+/g, ' ').trim();
-  // 短语归一化：making of / behind the scenes 的任意连写（makingof / behind-the-scenes）统一为 breakdown
-  const tn2 = tn.replace(/\b(making[ -]?of|behind[ -]?the[ -]?scenes)\b/g, ' breakdown ');
-  for (const word of BREAKDOWN_WORDS) {
-    if (new RegExp('(?<![a-z0-9])' + word + '(?![a-z0-9])').test(tn2)) return 'breakdown';
-  }
-  // 成片特征词（含法语 bande-annonce / court-métrage，Rubika/ESMA 学生片常见）
-  if (/\b(short film|teaser|trailer|official|officielle|bande[ -]annonce|court[ -]m[eé]trage|the movie|full movie|full film|full|movie|film)\b/.test(tn2)) return 'main';
-  // 作品名核心词匹配：去标题分隔符与常见修饰词后，若核心词出现在视频标题里 → 成片
-  const core = w.replace(/\s*[-–|].+$/, '').replace(/\b(the|a|short film|film|movie|2025|2026)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
-  if (core && core.length >= 3 && tn2.includes(core)) return 'main';
-  return 'other';
-}
-function parseEntry(html, selfId) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const og = doc.querySelector('meta[property="og:title"]')?.content || '';
-  let title = og.replace(/^The Rookies - /, '');
-  let author = '';
-  const byM = title.match(/, by (.+)$/);
-  if (byM) {
-    // og:title 可能含双 "by"（显示名 + 用户名，如 "..., by Yanina Perez-Masud, by thegraysays"），剥掉尾部 ", by \w+" 只留显示名
-    author = byM[1].split(', by ')[0];
-    title = title.replace(/, by .+$/, '');
-  }
-  // 作者显示名优先取自页面头像 alt（og:title 单 by 时 author 是用户名，如 "roberthmurillo"；头像 alt 才是 "Roberth Alexander Murillo Lugo"）
-  const avatar = doc.querySelector('.project-header img.avatar-media, .project-content img.avatar-media, main img.avatar-media')?.alt?.trim();
-  if (avatar && author.toLowerCase() !== avatar.toLowerCase()) author = avatar;
-  const videos = []; const images = []; const linkedEntries = [];
-  const pc = doc.querySelector('.project-content');
-  if (pc) {
-    // 收集 iframe 前最近的 H3 章节标题（如 "THE MOVIE"、"THE MAKING-OF"、"CHARACTER - HADENNA"），辅助判断成片
-    const sections = [];
-    const walker = document.createTreeWalker(pc, NodeFilter.SHOW_ELEMENT);
-    let lastH3 = '';
-    while (walker.nextNode()) {
-      const n = walker.currentNode;
-      if (n.tagName === 'H3') lastH3 = n.innerText.trim().replace(/\s+/g, ' ');
-      if (n.tagName === 'IFRAME') sections.push({ node: n, section: lastH3 });
-    }
-    for (const { node: el, section } of sections) {
-      const s = el.src || '';
-      if (s.includes('youtube.com/embed/')) videos.push({ host: 'youtube', url: 'https://www.youtube.com/watch?v=' + s.split('/embed/')[1].split('?')[0], section, title: null });
-      else if (s.includes('vimeo.com')) videos.push({ host: 'vimeo', url: s.split('?')[0], section, title: null });
-    }
-    // 2) 原生 <video> 元素（S3 直链 mp4，非 YouTube/Vimeo 内嵌）；保留完整 URL（可能带签名参数）
-    for (const v of pc.querySelectorAll(':scope video')) {
-      const src = v.currentSrc || v.getAttribute('src') || '';
-      if (src) videos.push({ host: 'direct', url: src, section: '', title: null });
-      for (const s of v.querySelectorAll('source')) {
-        if (s.src) videos.push({ host: 'direct', url: s.src, section: '', title: null });
-      }
-    }
-    // 3) 关联影片帖链接：.project-content 内指向其他 /entries/{id} 的超链接（如 "Click here to see the full movie post"）
-    for (const a of pc.querySelectorAll(':scope a[href*="/entries/"]')) {
-      const m = a.href.match(/\/entries\/(\d+)/);
-      if (m && m[1] !== String(selfId)) {
-        linkedEntries.push({ id: m[1], label: (a.innerText || '').trim().slice(0, 60) || a.href });
-      }
-    }
-    // 4) 以上视频全无时才是纯图片作品，提取 CloudFront 图片
-    if (videos.length === 0 && linkedEntries.length === 0) {
-      for (const img of pc.querySelectorAll(':scope img')) {
-        if (img.src && img.src.includes('cloudfront')) {
-          images.push(img.src.replace(/\/([0-9]+)xAUTO\//, '/3840xAUTO/'));
-        }
-      }
-    }
-  }
-  return { title, author, videos, images, linkedEntries };
-}
-
-// 遍历 links 批量解析；有关联影片帖的 entry 再 fetch 一次补全视频；最后用 oEmbed 补视频标题并分类成片
-const results = [];
-for (const l of links) {
-  const id = l.url.match(/entries\/(\d+)/)?.[1] || '';
-  const html = await rkFetch(l.url);
-  if (!html) continue;
-  const r = parseEntry(html, id);
-  const subVideos = [];
-  for (const le of r.linkedEntries) {
-    const lh = await rkFetch('https://www.therookies.co/entries/' + le.id);
-    if (lh) {
-      const sub = parseEntry(lh, le.id);
-      sub.videos.forEach(v => subVideos.push({ ...v, via: le.label }));
-    }
-  }
-  r.videos.push(...subVideos);
-  // oEmbed 逐条补标题（并发 6 个避免过载），再按标题分类成片
-  for (let i = 0; i < r.videos.length; i += 6) {
-    await Promise.all(r.videos.slice(i, i + 6).map(async v => { v.title = await oEmbedTitle(v); }));
-  }
-  for (const v of r.videos) v.role = classify(v, r.title);
-  results.push(r);
-}
-return results;
+```python
+import re, html
+s = open('/tmp/rk_results.html').read()
+tb = re.search(r'<title>(.*?)</title>', s).group(1)        # 比赛名
+contest_title = tb.split(' Results | ')[-1].strip()
+items = re.findall(   # 每个 .cardProject 的 h3 标题 + entry 链接
+  r'<a[^>]*class="[^"]*cardProject[^"]*"[^>]*href="([^"]*entries/(\d+))"[^>]*>.*?<h3[^>]*>(.*?)</h3>', s, re.S)
+links = []
+for path, eid, title in items:
+    t = html.unescape(re.sub(r'<[^>]+>', '', title)).strip()
+    t = re.sub(r'\s+', ' ', t)
+    links.append({'id': eid, 'title': t, 'url': 'https://www.therookies.co' + path})
 ```
 
-**注意**：全部 42 个 entry 的返回数组较大，BrowserClaw evaluate 的返回可能被截断（上限约 5000 字符）。此时**不要重跑**，直接读取落盘文件 `~/.browseros/tool-output/*.txt` 拿完整结果。
+`.cardProject` 的 `id` 形如 `entry-48448`，`href` 指向 `/entries/{id}`；h3 文本可能含换行，先 normalize 空白。
 
-**结构说明**：视频来源有四种——① `.project-content` 内 `iframe`（YouTube 形如 `youtube.com/embed/{id}`，Vimeo 形如 `player.vimeo.com/video/{id}`）；② 原生 `<video>` 元素（`currentSrc`/`src` 为 `rookies-production.s3-accelerate.amazonaws.com` 直链 mp4）；③ `.project-content` 内指向其他 `/entries/` 的超链接（纯图作品页可能用"here/click"文字链到完整影片帖）；④ 都没有才是纯图片作品。**爬取以视频为主；仅真正无视频、无关联影片帖的作品才提取图片**。若作品页有多个 `<video>`，用 `querySelectorAll(':scope video')` 一次性取全部。
+### 步骤 2：逐作品用浏览器解析每个 entry
 
-**成片识别（关键）**：一个作品往往混着成片与衍生内容（如 AZIMUTH 的 Vimeo 成片 `AZIMUTH - Sci-Fi Short Film` + 28 个 YouTube making-of/breakdown；SALAMANDER 的 YouTube `Salamander - Teaser 2025` 成片 + 密码锁定的 Vimeo + 多个 Showcase/Progression）。脚本用 oEmbed 拉取每个视频真实标题，`classify()` 按以下规则打标（contest 561 全 42 作品实测校准）：
-- **`main`（成片）**：标题含成片特征词（`short film`/`teaser`/`trailer`/`official`/`the movie`/`full movie`/`film`/`movie`/法语 `bande-annonce`/`court-métrage` 等），或含作品名核心词
-- **`breakdown`（衍生）**：标题命中衍生词表——making of（含 `mof` 缩写、任意连写）、breakdown（含 `brkd`）、behind the scenes/bts、showcase、progression/process、turnaround/**turn**/turntable、lookdev、reel、rig/rigging、test、shot、character（含复数）、environment、render、compositing/fx、lighting、blocking、demo、comparison、layout、pipeline、procedural、blendshape、expression、cycle、simulation、frame、storyboard 等。**词表覆盖复数与变体**（`characters`、`_Turn_`、`TurnTable`、`MOF`、`lookDev`、`firstshot_blocking`），避免把"角色/镜头展示"误判成片
-- **`locked`（密码锁定）**：Vimeo oEmbed 返回 `title: null` → 需密码，除非作品页正文给出密码否则跳过
-- **`other`**：无法归类的兜底
+对 links 里每个作品，用 browser-harness 导航到 entry 页，页内 `js()` 运行解析脚本（**`oEmbedTitle` / `classify` / `parseEntry` / 包装见 `references/therookies-entry.js`，用 `references/therookies-entry.min.js` 无注释版（browser-harness 的 `js()` 用 Runtime.evaluate，不压换行，但无注释版更稳）**）。**逐个导航、逐个解析，避免一次性返回大数组被截断**；对 `linkedEntries` 里每个 id 再 `js()` 对应 entry 页（复用 parse 包装，仅 `selfId` 换成该 id），把返回的 `videos` 合并进主作品并打 `via` 标记。
 
-**下载优先级**：每个作品**只下载 `main`（成片）**；仅当该作品**没有成片**（无 `main`）时才降级下载 `breakdown` 等其他视频；`locked` 一律跳过（除非页面给了密码）。DIFF 表格按此标注，方便用户只挑成片。
+**标签页管理**：解析前快照现有标签页，追踪每个 `new_tab()` 返回的 targetId，解析完成后关闭所有追踪的标签页，不碰用户原有标签。
 
-### 图片最高质量技巧（仅纯图片作品用）
+**browser-harness 调用模板**（entry 页解析 + 标签管理）：
+```python
+before = {t['targetId'] for t in list_tabs()}
+tracked = []
+results = []
 
-CloudFront 图片 URL 含尺寸段 `/1400xAUTO/`、`/800xAUTO/` 等。**把 `/{数字}xAUTO/` 替换为 `/3840xAUTO/` 即得原图**（已验证 3840xAUTO 返回原始分辨率大图；5000xAUTO/4096xAUTO/2000xAUTO 等均返回 400，3840 是上限）。
+for eid, title in entries:
+    tid = new_tab(f"https://www.therookies.co/entries/{eid}")
+    tracked.append(tid)
+    wait_for_load()
+    import time; time.sleep(3)
+    expr = open("/path/to/therookies-entry.min.js").read().replace('"48448"', f'"{eid}"')
+    r = js(expr)
+    if r:
+        results.append(r[0])
+
+for tid in tracked:
+    close_tab(target=tid)
+```
+
+`js()` 支持 async/await（Runtime.evaluate + awaitPromise）与非法顶层 `return` 自动包函数重试，min.js 末尾的 `return (async()=>{...})()` 直接兼容。
+
+### 步骤 2b：oEmbed 补标题 + classify 分类
+
+解析完成后，对每个 entry 的 videos 批量 fetch oEmbed 标题（并行 6 条），`classify(v, r.title)` 分类（`workTitle` = 主作品 parseEntry 干净标题，即页面 h1；合并来的视频也用同一 `r.title`，保证派生词表命中精准）。
+
+**脚本逻辑（与 reference 一致）**：视频来源四种——① `.project-content` 内 `iframe`（YouTube `youtube.com/embed/{id}`、Vimeo `player.vimeo.com/video/{id}`）；② 原生 `<video>`（`currentSrc`/`src` 为 S3 直链 mp4）；③ 指向其他 `/entries/` 的超链接；④ CloudFront 图片。视频为主但图片始终提取。命名取 `og:title` 剥 `The Rookies - ` 前缀与尾部 `, by 用户名`（作者若在标题内则保留，勿再剥）。
+
+**成片分类（contest 561 全 42 作品实测校准）**：
+- `main`：标题含成片词（`short film`/`teaser`/`trailer`/`official`/`the movie`/`full movie`/`film`/`movie`/法语 `bande-annonce`/`court-métrage`），或含作品名核心词
+- `breakdown`：标题命中衍生词表——making of/mof、breakdown/brkd、behind the scenes/bts、showcase、progression/process、turnaround/turn/turntable、lookdev、reel、rig/rigging、test、shot、character、environment、render、compositing/fx、lighting、blocking、demo、comparison、layout、pipeline、procedural、blendshape、expression、cycle、simulation、frame、storyboard 等（覆盖复数与 `_Turn_`/`TurnTable`/`MOF`/`lookDev` 变体，避免角色/镜头展示误判成片）
+- `locked`：Vimeo oEmbed 返回 `title: null` → 需密码，页面没给就跳过
+- `other`：兜底
+
+**下载优先级**：每作品**只下载 `main`（成片）**；无 `main` 才降级下载 `breakdown`（衍生）；无 `breakdown` 降级 `other`；`locked` 一律跳过（除非页面给了密码）。有视频不下载图片（图片仅供 DIFF 展示）；纯图作品才下载全部图片。DIFF 表呈现时需完整展示全部四列分类，不可合并或省略。
+
+### 图片最高质量技巧（CloudFront 图片通用）
+
+CloudFront 图片 URL 含尺寸段 `/1400xAUTO/` 等。**把 `/{数字}xAUTO/` 替换为 `/3840xAUTO/` 拿到更高分辨率版本**。实测行为：
+- `1400xAUTO`：始终可用（默认展示尺寸）
+- `3840xAUTO`：原图分辨率高于 1400 时返回更高分辨率版本；原图不足 1400 时返回 400
+- `2000xAUTO` / `4096xAUTO` / `5000xAUTO`：均返回 400
+
+**下载时优先用 3840xAUTO，如果返回 400 则回退到 1400xAUTO**。parseEntry 脚本已自动替换为 3840xAUTO，无需额外处理。
 
 ### DIFF 表格格式（对话中呈现）
 
-每作品一行，**成片单独标注**，衍生内容（making-of/breakdown/showcase 等）与密码锁定的视频合并为"衍生"列，交给用户判断下载哪些；**纯图片作品（无视频）列图片数量**：
+每作品一行，按 classify 四类分列，图片列标注 CloudFront 图片数：
 
-| # | 作品 | 作者 | 成片 | 衍生（含密码锁定） |
-|---|------|------|------|------|
-| 1 | The Lead that Bled | ... | Vimeo "The Lead that Bled - Short Film" | 衍生 ×6 |
-| 2 | AZIMUTH Shortfilm | fmichez | Vimeo "AZIMUTH - Sci-Fi Short Film" | 衍生 ×28（making-of/breakdown） |
-| 3 | SALAMANDER - Short Film | pumphik | YouTube "Salamander - Teaser 2025" | Vimeo ×4（含 1 密码锁定、Showcase/Progression） |
-| 4 | The Character Dossier | Yanina Perez-Masud | 无成片（降级） | 原生视频 ×8（S3 mp4） |
-| 5 | Yanina ... | ... | — | 图片 ×53（纯图片） |
-| ... | ... | ... | ... | ... |
+| # | 作品 | 作者 | 成片(main) | 衍生(breakdown) | 锁定(locked) | 其他(other) | 图片 |
+|---|------|------|-----------|----------------|-------------|-------------|------|
+| 1 | The Lead that Bled | ... | Vimeo "The Lead that Bled - Short Film" | 衍生 ×6 | — | — | 图片 ×8 |
+| 3 | SALAMANDER - Short Film | pumphik | YT "Salamander - Teaser 2025" | — | 密码锁定 ×1 | — | 图片 ×12 |
+| 4 | The Character Dossier | Yanina Perez-Masud | — | — | — | S3 原生视频 ×8 | — |
+| 5 | Product Design Portfolio | ... | — | — | — | — | 图片 ×53 |
 
-作者列显示**显示名**（非用户名）。提交选择后按序号下载。**默认只下载"成片"列；无成片作品才降级下载衍生列**；密码锁定的 Vimeo 跳过。表格中对"关联影片帖"作品在资源列标注 `→ 关联影片帖标题`，让用户知道跳转后才能拿到完整影片。
+作者列显示**显示名**（非用户名）。**默认只下载"成片(main)"列；无成片才降级下载衍生(breakdown)列；无衍生降级其他(other)；锁定(locked)跳过**。关联影片帖作品在资源列标注 `→ 关联影片帖标题`。有视频不下载图片（图列仅供展示附带图数）；仅用户明确要求时才连图并按 Video/Images 分类。纯图作品下载全部图片。
 
 ### 目录结构
 
-主文件夹 = 链接标题（比赛名），每个作品一个子文件夹，子文件夹内按资源类型分子目录，**资源文件一律用作品名命名，多资源追加 `_序号`**：
+主文件夹 = 比赛名，每个作品一个子文件夹（parseEntry 干净 og:title = 页面 h1）。资源文件用作品名命名，多资源追加 `_序号`。单类型素材直接放主目录；仅同一作品既下视频又下图片（用户显式要求）才建 `Video/`、`Images/`：
 
 ```
 {download_dir}/
-└── Rookie of the Year | 3D Animation/          ← 比赛名（results 页标题）
-    └── {作品标题} by {作者}/                    ← 每作品一个文件夹
-        ├── Video/                              ← 视频（有视频的作品）
-        │   ├── {作品标题}_01.mp4
-        │   └── {作品标题}_02.mp4
-        └── Images/                             ← 图片（纯图片作品）
-            ├── {作品标题}_01.jpg
-            └── ...
+└── Rookie of the Year | 3D Animation/
+    ├── {作品标题}/                         ← 仅视频：直接放主目录
+    │   ├── {作品标题}_01.mp4
+    ├── {混合作品标题}/                     ← 视频+图片并存：才分 Video/Images
+    │   ├── Video/{混合作品标题}_01.mp4
+    │   └── Images/{混合作品标题}_01.jpg
+    └── {纯图片作品标题}/                   ← 仅图片：直接放主目录
+        └── {纯图片作品标题}_01.jpg
 ```
 
-目录名中如含 `/`、`:`、`|` 等非法字符需替换为 `-`（例如比赛名 `Rookie of the Year | 3D Animation` → `Rookie of the Year - 3D Animation`）。文件名的非法字符同样替换为 `-`。`{作品标题}` 用 parseEntry 解析出的干净标题（已剥 `The Rookies - ` 前缀和 `, by` 尾部）。若某视频来自关联影片帖（有 `via` 标记），文件名仍用作品标题命名，序号顺延。
+目录/文件名统一用 **`sanitize_title`** 清洗（见「浏览器访问约定」）。`{比赛名}` 用结果页标题，`{作品标题}` 用 parseEntry 干净 og:title（剥 `The Rookies - ` 前缀、`by 用户名` 尾部；作者保留为标题本体）。**只替换 `/` `:` `|` 等非法字符为 `-`，保留空格，压缩连续 `-`**——不要学结果页 h3 那样把空格也转 `-`（会出现 `Finn-Bogaert---Environment-Art`）。关联影片帖视频（有 `via` 标记）仍用作品标题命名，序号顺延。
 
 ### 步骤 3：下载
 
-🔴 **CHECKPOINT**：按作品下载时，**先只下载成片（`role === 'main'`）**；若该作品无成片，才降级下载其余视频（`breakdown`/`other`，排除 `locked`）。`locked`（Vimeo 密码锁定）一律跳过——除非作品页正文里明确给出了密码（此时把密码传给 Vimeo 页/yt-dlp）。
+🔴 **CHECKPOINT**：按作品下载时**先只下载成片（`main`）**；无成片才降级下载其余视频（`breakdown`/`other`，排除 `locked`）。`locked` 一律跳过，除非作品页正文明确给了密码（则传给 Vimeo/yt-dlp）。
 
-**YouTube 视频**（用 yt-dlp，见 YouTube 专用处理；公开视频无需 cookies）。每条视频用作品名 + 递增序号命名：
+**目标目录规则**：有视频 → 只下视频，直接存 `<作品目录>/` 主目录；纯图片 → 下全部图片存主目录；用户显式要求连图一起下载（仅此情况）→ 视频存 `Video/`、图片存 `Images/`。
 
+**YouTube**（yt-dlp，公开视频无需 cookies；见 YouTube 专用处理）：
 ```bash
 yt-dlp -P "<作品目录>/Video" -o "{作品标题}_01.%(ext)s" -S "res:1080" "<YouTube URL>"
 ```
+多条时序号递增（`_01`、`_02`…）（混合作品 `-P` 指向 `Video`，仅视频作品指向 `<作品目录>`）。
 
-多条视频时按顺序把序号递增（`_01`、`_02`…）。
+**Vimeo**（优先 JWT 方案，被 Turnstile 挡时主用；未被挡可 yt-dlp；见 Vimeo 专用处理）：
+```bash
+# 每条 Vimeo 视频先试 yt-dlp（公开可过），401/403 转 JWT：
+python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" -o "<作品目录>/Video/{作品标题}_01.mp4"
+```
+密码锁定的 Vimeo（oEmbed `title: null`）不下载；页面给了密码用 `--video-password "<密码>"` 重试。
 
-**Vimeo 视频**（见 Vimeo 专用处理——必须登录 Vimeo，未登录则提示用户登录后重试）。命名同上。密码锁定的 Vimeo（oEmbed `title: null`）不下载；若作品页正文给了密码，用 `--video-password "<密码>"` 重试。
-
-**原生 `<video>` 直链（S3 mp4）**（用 curl 直接下载，S3 直连无需 cookies）：
-
+**原生 `<video>` 直链（S3 mp4）**（curl 直接下载，S3 直连无需 cookies；mp4/mov 无需转码；保留签名 URL）：
 ```bash
 curl -sL -o "<作品目录>/Video/{作品标题}_01.mp4" "<S3 mp4 URL>"
 ```
 
-直链为 mp4/mov，无需转码；多条时递增序号。S3 直链可能带签名参数，保留完整 URL。
-
-**图片（仅纯图片作品）**（用 curl 直接下载 3840xAUTO 原图，CloudFront 直连无需 cookies）：
-
+**图片**（仅纯图作品，或用户显式要求混合作品连图时；CloudFront 直连无需 cookies）：
 ```bash
 curl -sL -o "<作品目录>/Images/{作品标题}_01.jpg" "<3840xAUTO URL>"
 ```
-
-图片较多时可用循环并行下载（注意控制并发，如 `xargs -P 4`）。扩展名从 URL 取（`.jpg`/`.png`/`.gif`），序号递增。
+图片较多用循环并行（控制并发如 `xargs -P 4`）；扩展名从 URL 取（.jpg/.png/.gif），序号递增。
 
 ## 小红书专用处理
 
@@ -756,10 +550,7 @@ URL 示例：`https://www.xiaohongshu.com/explore/xxx`、`https://xhslink.com/xx
 
 XHS-Downloader 支持图文笔记（图片）和视频笔记的无水印下载。
 
-### 依赖检查
-
-首次运行前确保已安装 XHS-Downloader：
-
+**依赖检查**：
 ```bash
 ls /tmp/xhs-downloader/main.py >/dev/null 2>&1 || {
   git clone https://github.com/JoeanAmier/XHS-Downloader.git /tmp/xhs-downloader
@@ -772,46 +563,18 @@ ls /tmp/xhs-downloader/main.py >/dev/null 2>&1 || {
 🔴 **CHECKPOINT**：启动前先确认依赖就绪，再清理端口冲突。
 
 ```bash
-# 0. 检查 main.py 是否存在
-test -f /tmp/xhs-downloader/main.py || { echo "ERROR: XHS-Downloader 未安装，先运行依赖安装"; exit 1; }
-
-# 1. 检查 config.json 是否存在
-test -f <SKILL_DIR>/config.json || { echo "ERROR: config.json 不存在，请先完成 First Run Setup"; exit 1; }
-
-# 2. 清理已有服务（防止端口占用）
-kill $(lsof -t -i:5556) 2>/dev/null && echo "Killed existing XHS-API" || echo "Port 5556 free"
-
-# 3. 读取下载目录
+test -f /tmp/xhs-downloader/main.py || { echo "ERROR: 先安装 XHS-Downloader"; exit 1; }
+test -f <SKILL_DIR>/config.json || { echo "ERROR: 先完成 First Run Setup"; exit 1; }
+kill $(lsof -t -i:5556) 2>/dev/null   # 清理端口占用
 DOWNLOAD_DIR=$(python3 -c "import json; print(json.load(open('<SKILL_DIR>/config.json'))['download_dir'])")
-
-# 4. 启动 API 服务（端口 5556），用 --work_path 指向统一下载目录
-python /tmp/xhs-downloader/main.py api --port 5556 --work_path "$DOWNLOAD_DIR" &
-
-# 5. 健康检查（轮询直到就绪，非硬等待）
-for i in $(seq 1 10); do
-  sleep 1
-  curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5556/docs 2>/dev/null | grep -q 200 && echo "API Ready" && break
-done
+python /tmp/xhs-downloader/main.py api --port 5556 --work_path "$DOWNLOAD_DIR" &   # --work_path→保存到 {download_dir}/Download/
+for i in $(seq 1 10); do sleep 1; curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:5556/docs 2>/dev/null | grep -q 200 && echo "API Ready" && break; done
 ```
 
-`--work_path` 使得所有下载文件保存到 `{download_dir}/Download/` 下，而非 XHS-Downloader 的默认位置。
-
-调用 API 下载：
-
+调用 API 下载（响应含标题、作者、标签和下载状态；`download:false` 仅取无水印地址不下）：
 ```bash
-curl -s -X POST http://127.0.0.1:5556/xhs/detail \
-  -H "Content-Type: application/json" \
+curl -s -X POST http://127.0.0.1:5556/xhs/detail -H "Content-Type: application/json" \
   -d '{"url": "<小红书链接>", "download": true}' | python3 -m json.tool
-```
-
-响应包含作品信息（标题、作者、标签等）和下载状态。
-
-如果不需要实时下载，仅获取无水印地址：
-
-```bash
-curl -s -X POST http://127.0.0.1:5556/xhs/detail \
-  -H "Content-Type: application/json" \
-  -d '{"url": "<小红书链接>", "download": false}'
 ```
 
 ### 方式 B：CLI 模式（单次下载，自动使用统一下载目录）
@@ -821,108 +584,52 @@ DOWNLOAD_DIR=$(python3 -c "import json; print(json.load(open('<SKILL_DIR>/config
 python /tmp/xhs-downloader/main.py --work_path "$DOWNLOAD_DIR" "<小红书链接>"
 ```
 
-XHS-Downloader 会启动 TUI 界面并自动识别内容类型（图文/视频）开始下载。文件保存到 `{download_dir}/Download/`。
+自动识别图文/视频，文件保存到 `{download_dir}/Download/`。
 
 ### 文件结构
 
-下载路径由 `config.json` 的 `download_dir` + `folder_name`（默认 `Download`）拼接而成：
-
+下载路径 = `download_dir` + `folder_name`（默认 `Download`）：
 ```
-{download_dir}/
-└── Download/              ← folder_name 控制
-    ├── {作品标题}_001.{ext}
-    ├── {作品标题}_002.{ext}
-    └── ...
+{download_dir}/Download/{作品标题}_001.{ext} ...
 ```
-
-开启 `folder_mode` 后，每个作品保存在单独文件夹：
-
-```
-{download_dir}/
-└── Download/
-    └── {作品标题}/
-        ├── 001.{ext}
-        ├── 002.{ext}
-        └── ...
-```
-
-开启 `author_archive` 后，按作者归档：
-
-```
-{download_dir}/
-└── Download/
-    └── {作者ID}_{作者昵称}/
-        └── {作品标题}_001.{ext}
-```
+- 开 `folder_mode` → `Download/{作品标题}/001.{ext}`
+- 开 `author_archive` → `Download/{作者ID}_{作者昵称}/{作品标题}_001.{ext}`
 
 ### 仅下载指定图片
 
-如果图文笔记有很多张图，只想下载其中几张，在 CLI 模式下用 `index` 参数：
+POST body 追加 `index` 数组字段：`{"url":"...","download":true,"index":[1,3,5]}`。
 
-对 API 模式的 POST body 追加 `index` 字段：
+### Cookie 配置（可选，保证高画质）
 
+2.2+ 版无需 Cookie 也可用，配 Cookie 更高画质。用 browser-harness 从真实浏览器直取 `web_session`（或用「cookies 直取」流程生成的 `<cookies_dir>/xiaohongshu.txt`），F12→网络→过滤 `web_session` 复制完整 Cookie 亦可，写入 `/tmp/xhs-downloader/settings.json` 的 `cookie` 字段，或 API 调用传 `cookie` 参数：
 ```json
-{
-  "url": "<小红书链接>",
-  "download": true,
-  "index": [1, 3, 5]
-}
+{"url":"...","download":true,"cookie":"web_session=xxx; a1=xxx; ..."}
 ```
 
-### Cookie 配置（可选，推荐配置以保证高画质）
+### 配置说明（改 `/tmp/xhs-downloader/settings.json`）
 
-XHS-Downloader 2.2+ 版本无需 Cookie 也可正常工作，但配置 Cookie 可以获得更高画质。
-
-1. 用 BrowserClaw 访问 https://www.xiaohongshu.com 并登录（可选）
-2. F12 → 网络 → 过滤 `web_session` → 复制完整 Cookie
-3. 编辑 `/tmp/xhs-downloader/settings.json` 写入 `cookie` 字段：
-
-```json
-{
-  "cookie": "web_session=xxx; a1=xxx; ..."
-}
-```
-
-或者在 API 调用时传 `cookie` 参数：
-
-```json
-{
-  "url": "<小红书链接>",
-  "download": true,
-  "cookie": "web_session=xxx; a1=xxx; ..."
-}
-```
-
-### 配置说明
-
-主要配置修改 `/tmp/xhs-downloader/settings.json`：
-
-| 参数 | 类型 | 含义 | 默认值 |
-|------|------|------|--------|
-| `image_format` | str | 图文下载格式：AUTO/PNG/WEBP/JPEG/HEIC | `WEBP` |
-| `image_download` | bool | 图文作品下载开关 | `true` |
-| `video_download` | bool | 视频作品下载开关 | `true` |
-| `folder_mode` | bool | 每个作品独立文件夹 | `false` |
-| `author_archive` | bool | 按作者归档 | `false` |
-| `download_record` | bool | 记录已下载作品（防重复） | `true` |
-| `name_format` | str | 文件命名模板 | `发布时间 作者昵称 作品标题` |
+| 参数 | 含义 | 默认值 |
+|------|------|--------|
+| `image_format` | 图文格式 AUTO/PNG/WEBP/JPEG/HEIC | `WEBP` |
+| `image_download` / `video_download` | 图文/视频下载开关 | `true` |
+| `folder_mode` | 每作品独立文件夹 | `false` |
+| `author_archive` | 按作者归档 | `false` |
+| `download_record` | 防重复下载 | `true` |
+| `name_format` | 命名模板 | `发布时间 作者昵称 作品标题` |
 
 ### 已知问题
 
-- **URL 携带日期信息**：旧链接可能被风控，要求用户提供最新分享链接（在 App 中点击分享按钮复制）
-- **无水印视频处理耗时**：下载后脚本需要处理文件，请勿多次点击
-- **Mac 可执行文件签名**：如果使用 Releases 下载的二进制，首次运行需 `xattr -cr /path/to/main`
+- 旧链接可能被风控，要求最新分享链接（App 内点分享复制）
+- 无水印视频下载后需处理文件，勿多次点击
+- Releases 二进制首次运行需 `xattr -cr /path/to/main`（仅 Mac）
 
 ## 抖音无水印专用处理
 
 URL 示例：`https://www.douyin.com/video/xxx`、`https://v.douyin.com/xxx/`
 
-抖音（Douyin）的视频通过 yt-dlp 下载会携带水印。本技能使用 parse-video-py 获取无水印直链进行下载。
+抖音视频用 yt-dlp 下载会带水印，本技能用 parse-video-py 拿无水印直链。
 
-### 依赖检查
-
-首次运行前确保已安装 parse-video-py：
-
+**依赖检查**：
 ```bash
 ls /tmp/parse-video-py/main.py >/dev/null 2>&1 || {
   git clone https://github.com/wujunwei928/parse-video-py.git /tmp/parse-video-py
@@ -934,69 +641,38 @@ ls /tmp/parse-video-py/main.py >/dev/null 2>&1 || {
 
 #### 步骤 1：启动解析服务
 
-🔴 **CHECKPOINT**：启动前先检查依赖是否存在，再清理端口冲突。
+🔴 **CHECKPOINT**：先检查依赖是否存在，再清理端口冲突。
 
 ```bash
-# 0. 检查 main.py 是否存在
-test -f /tmp/parse-video-py/main.py || { echo "ERROR: parse-video-py 未安装，先运行依赖安装"; exit 1; }
-
-# 1. 检查 config.json 是否存在
-test -f <SKILL_DIR>/config.json || { echo "ERROR: config.json 不存在，请先完成 First Run Setup"; exit 1; }
-
-# 2. 清理已有服务
-kill $(lsof -t -i:8000) 2>/dev/null && echo "Killed existing parse-video" || echo "Port 8000 free"
-
-# 3. 启动 HTTP 服务（默认端口 8000）
+test -f /tmp/parse-video-py/main.py || { echo "ERROR: 先安装 parse-video-py"; exit 1; }
+test -f <SKILL_DIR>/config.json || { echo "ERROR: 先完成 First Run Setup"; exit 1; }
+kill $(lsof -t -i:8000) 2>/dev/null   # 清理端口
 cd /tmp/parse-video-py && python main.py &
-
-# 4. 轮询健康检查（确认端口可达，非硬等待）
-for i in $(seq 1 10); do
-  sleep 1
-  STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ 2>/dev/null)
-  # 只要不是连接错误（无 5xx）就算启动成功
-  [ -n "$STATUS" ] && [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ] && echo "Service Ready (HTTP $STATUS)" && break
-done
+for i in $(seq 1 10); do sleep 1; STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/ 2>/dev/null); [ -n "$STATUS" ] && [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ] && echo "Service Ready (HTTP $STATUS)" && break; done
 ```
 
 #### 步骤 2：获取无水印视频直链
 
 ```bash
-# 调用解析 API
-RESULT=$(curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<抖音分享链接>")
-
-# 提取视频 URL
+RESULT=$(curl -s --get --data-urlencode "url=<抖音分享链接>" \
+  "http://127.0.0.1:8000/video/share/url/parse")
 VIDEO_URL=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['video_url'])")
 TITLE=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['title'])")
 AUTHOR=$(echo "$RESULT" | python3 -c "import sys,json; print(json.load(sys.stdin)['data']['author']['nickname'])")
-
-echo "标题: $TITLE"
-echo "作者: $AUTHOR"
-echo "无水印视频: $VIDEO_URL"
 ```
 
 #### 步骤 3：下载无水印视频（保存到统一下载目录）
 
-先从 `config.json` 读取下载目录：
-
 ```bash
 DOWNLOAD_DIR=$(python3 -c "import json; print(json.load(open('<SKILL_DIR>/config.json'))['download_dir'])")
-```
-
-使用 curl 下载（无水印直链）：
-
-```bash
-curl -L -o "${DOWNLOAD_DIR}/${TITLE:0:50}.mp4" "$VIDEO_URL"
-```
-
-或使用 yt-dlp 以支持断点续传和进度显示（将无水印直链传给 yt-dlp）：
-
-```bash
-yt-dlp -P "$DOWNLOAD_DIR" -o "%(title)s.%(ext)s" "$VIDEO_URL"
+TITLE=$(echo "$TITLE" | python3 -c "import sys,re;t=sys.stdin.read().strip();t=re.sub(r'[\\\\/:*?\"<>|]','-',t);t=re.sub(r'\\s+',' ',t).strip();print(re.sub(r'-{2,}','-',t).strip('-. ')[:50])")  # sanitize_title（同「浏览器访问约定」）
+curl -L -o "${DOWNLOAD_DIR}/${TITLE}.mp4" "$VIDEO_URL"                            # 或
+yt-dlp -P "$DOWNLOAD_DIR" -o "%(title)s.%(ext)s" "$VIDEO_URL"                     # yt-dlp 支持断点续传
 ```
 
 ### 图集（图文）处理
 
-抖音图文笔记返回的 `image_list` 包含所有图片地址：
+抖音图文笔记返回的 `image_list` 含全部图片地址（`live_photo_url` 字段表示含实况照片视频原件）：
 
 ```bash
 RESULT=$(curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<抖音图文链接>")
@@ -1004,77 +680,30 @@ echo "$RESULT" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)['data']
 for i, img in enumerate(data.get('image_list', [])):
-    if isinstance(img, dict):
-        print(f'{i+1}: {img.get(\"url\", \"\")}')
-    else:
-        print(f'{i+1}: {img}')
+    print(f'{i+1}: {img.get(\"url\", \"\") if isinstance(img, dict) else img}')
 "
 ```
 
-解析结果如包含 `live_photo_url` 字段，表示该图包含实况照片视频原件。
-
 ### 其他平台（小红书、快手等）
 
-parse-video-py 同样支持小红书、快手、微博、Bilibili 等平台的解析：
-
-```bash
-# 小红书
-curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<小红书链接>"
-
-# 快手
-curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<快手链接>"
-
-# 微博
-curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<微博链接>"
-```
-
-从返回的 JSON 中提取对应字段即可获得无水印资源。
-
-### MCP 模式（进阶）
-
-parse-video-py 原生支持 MCP 协议，可作为 MCP 工具集成到 AI 编码助手中：
-
-```bash
-cd /tmp/parse-video-py && python main.py --mcp
-```
+parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http://127.0.0.1:8000/video/share/url/parse?url=<链接>"`，从返回 JSON 提取对应字段即可。
 
 ### 注意
 
-- **使用 App 分享链接**：网页版链接未做充分测试，必须使用 App 分享链接
-- **频繁请求**：过快重复解析可能触发 IP 限频
-- **服务保持**：将 HTTP 解析服务设为持久化后台服务
-- **服务重启**：如遇解析失败，重启服务后重试：
-
-```bash
-kill $(lsof -t -i:8000) 2>/dev/null
-cd /tmp/parse-video-py && python main.py &
-```
+- **必须用 App 分享链接**（网页版未充分测试）；过快重复解析可能触发 IP 限频
+- 建议服务持久化运行；解析失败重启：`kill $(lsof -t -i:8000); cd /tmp/parse-video-py && python main.py &`
+- 进阶：`cd /tmp/parse-video-py && python main.py --mcp` 走 MCP 模式集成
 
 ## 清晰度选择策略
 
-🔴 **CHECKPOINT**：发现格式中有 >1080p 选项时，必须询问用户。
+🔴 **CHECKPOINT**：格式中有 >1080p 选项时必须询问用户。
 
-先列出可用格式：
+1. `yt-dlp -F "<URL>"` 提取所有视频格式的**高度值**（resolution/height 列）
+2. 筛选 >= 1080p 的选项，去重升序
+3. 决策：最大高度 <= 1080 → 自动 `-S "res:1080"`；> 1080 → `question` 列出 >= 1080p 选项让用户选
+4. 选 1080p → `res:1080`；4K/2160p → `res:2160`；8K/4320p → `res:4320`；具体值 → `res:<HEIGHT>`
 
-```bash
-yt-dlp -F "<URL>"
-```
-
-从输出中解析所有视频格式的**高度值**（resolution/height 列），因为 yt-dlp 的列格式是固定的。
-
-步骤：
-1. 运行 `-F` 提取所有视频格式的高度
-2. 筛选 >= 1080p 的选项，去重后升序排列
-3. 决策：
-   - 最大高度 <= 1080 → 自动用 `-S "res:1080"` 下载
-   - 最大高度 > 1080 → 用 `question` 列出 >= 1080p 的所有选项让用户选
-4. 用户选择后：
-   - 选 1080p → `-S "res:1080"`
-   - 选 4K / 2160p → `-S "res:2160"`
-   - 选 8K / 4320p → `-S "res:4320"`
-   - 选具体值 → `-S "res:<HEIGHT>"`
-
-注意 `-S "res:X"` 的含义是"限制分辨率不超过 X，并优先接近 X 的最佳格式"，这正是需要的。
+`-S "res:X"` 含义：限制分辨率不超过 X，优先接近 X 的最佳格式。
 
 ## 通用参数参考
 
@@ -1082,134 +711,101 @@ yt-dlp -F "<URL>"
 | 参数 | 用途 |
 |------|------|
 | `-P <dir>` / `--paths <dir>` | 下载目录 |
-| `-o "<template>"` | 输出文件名 |
-| `-S "res:1080"` | 限制并排序分辨率 |
-| `-f "bv*+ba/b"` | 最佳视频+最佳音频 |
-| `-F` | 列出格式 |
-| `--cookies <file>` | 使用 cookies 文件（用户上传的 `<平台>.txt`，见 Cookies 获取引导） |
+| `-o "<template>"` / `-S "res:1080"` | 输出文件名 / 限制并排序分辨率 |
+| `-f "bv*+ba/b"` / `-F` | 最佳视频+音频 / 列出格式 |
+| `--cookies <file>` | 使用 `<平台>.txt` cookies |
 | `--impersonate chrome` | 浏览器指纹模拟 |
 | `--download-sections "*START-END"` | 时间切片（需 ffmpeg） |
 
 ### gallery-dl
 | 参数 | 用途 |
 |------|------|
-| `-d <dir>` / `--destination <dir>` | 下载目录（基础路径） |
-| `-f "<template>"` | 文件名模板（用 `{field}` 语法） |
-| `-D <dir>` | 精确下载目录（字面路径，不支持模板） |
+| `-d <dir>` / `-D <dir>` | 下载目录 / 精确目录（字面路径） |
+| `-f "<template>"` | 文件名模板（`{field}` 语法） |
 | `-K` / `--list-keywords` | 列出可用元数据字段及示例值 |
 | `-o "directory=<template>"` | 目录路径模板 |
-| `-o "filename=<template>"` | 文件名模板（同 `-f`） |
-| `-s` | 模拟运行，不实际下载 |
-| `--cookies <file>` | 使用 cookies 文件（用户上传的 `<平台>.txt`） |
-| `--write-info-json` | 同时保存元数据 JSON |
+| `-s` / `--write-info-json` | 模拟运行 / 保存元数据 JSON |
+| `--cookies <file>` | 使用 cookies |
 
-### gallery-dl 输出模板变量
-`{title}`、`{category}`、`{subcategory}`、`{num}`、`{extension}`、`{filename}`、`{count}`、`{user[key]}`（嵌套字段用 `[]`）
+### gallery-dl 模板变量
+`{title}`、`{category}`、`{subcategory}`、`{num}`、`{extension}`、`{filename}`、`{count}`、`{user[key]}`（嵌套用 `[]`）
 
 ## ⚠️ 反例与黑名单
 
-| # | 危险动作 | 后果 | 正确做法 |
-|---|---------|------|---------|
-| 1 | 用 yt-dlp 下载 ArtStation | 失败（yt-dlp 无 ArtStation extractor） | 必须用 gallery-dl |
-| 2 | 用 gallery-dl 下载 YouTube/Bilibili | 失败（gallery-dl 不用于视频平台） | 必须用 yt-dlp |
-| 3 | 不检查 ffmpeg 就用 `--download-sections` | 报错退出 | 先 `command -v ffmpeg` 检查 |
-| 4 | 下载 Bilibili 时不加 `--impersonate chrome` | HTTP 412 错误 | 必须加 `--impersonate chrome` + `--add-header Origin/Referer` |
-| 5 | 混用输出模板语法：`%(title)s` vs `{title}` | 文件名乱码或报错 | yt-dlp 用 `%(var)s`，gallery-dl 用 `{var}` |
-| 6 | 跳过首次运行目录设置 | 文件下载到当前目录散落各处 | 必须先设 `DOWNLOAD_DIR` |
-| 7 | 用 `--cookies-from-browser` 自动提取 cookies | 依赖本地浏览器登录态，跨平台不可复现 | 必须用用户上传的 `<cookies_dir>/<平台>.txt` 文件 |
-| 8 | 下载高画质不检查账号状态 | 大会员内容下载失败 | 对 >1080p 选项标注需登录，提示用户更新 cookies 文件 |
-| 9 | 用 `--cookies-from-browser chromium:` 或提取脚本读浏览器 cookies | Keychain 解密失败、依赖具体浏览器 | 用户用 Get cookies.txt LOCALLY 扩展导出后上传 |
-| 10 | cookies 文件长期不更新导致失效 | 下载报权限错误 | 仅在下载失效或高画质锁定时提示用户重新导出覆盖 |
-| 11 | 用 yt-dlp 下载小红书 | 需要 web_session cookie，经常 extractor 损坏 | 必须用 XHS-Downloader |
-| 12 | 用 XHS-Downloader 下载 YouTube/Bilibili | 失败（XHS-Downloader 仅支持小红书） | 必须用 yt-dlp |
-| 13 | 用 yt-dlp 下载抖音（期望无水印） | 视频带抖音水印 | 必须用 parse-video-py 获取无水印直链 |
-| 14 | 不启动 parse-video-py 服务就调用 API | curl 返回 502/Connection refused | 先 `cd /tmp/parse-video-py && python main.py &` 启动服务 |
-| 15 | XHS-Downloader 旧代码未更新 | 小红书反爬更新导致解析失败 | 定期 `git pull` 更新到最新版 |
-| 16 | 用 curl 直接抓 therookies.co 页面 | 返回 5.6KB JS challenge 拦截页 | 必须用 BrowserClaw 在页内 `fetch`（同源携带 cookies） |
-| 17 | 用浏览器逐个导航 42 个作品页爬取 | 极慢，且可能触发限流 | 在 results 页 evaluate 中批量 `fetch` 所有 entry HTML |
-| 18 | 下载 therookies 纯图片作品的图片时保留原 `1400xAUTO` 尺寸段 | 拿到的是缩略图而非原图 | 替换为 `/3840xAUTO/` 拿原图 |
-| 19 | 期望 yt-dlp 匿名下载 therookies 嵌入的 Vimeo 视频 | 报 `Failed to fetch macos OAuth token: HTTP Error 401`（上游 bug #17271） | 用 `--cookies + --extractor-args "vimeo:client=web"`；未登录则要求用户登录 Vimeo 后重试 |
-| 20 | 解析时只查 `.project-content` 内的 `iframe`，忽略原生 `<video>` | 漏掉 S3 直链 mp4（如 Character Dossier），把有视频的作品当纯图 | 同时查 `querySelectorAll(':scope video')`（`currentSrc`/`src`）和 `video > source` |
-| 21 | 纯图作品页忽略正文里的影片超链接 | 漏掉指向完整影片帖的 `a[href*="/entries/"]`（如 Allegaert "Click here"） | 检测 `.project-content` 内关联 entry 链接，`fetch` 后合并其视频 |
-| 22 | 作者取 og:title 里单 by 的用户名 | 作者列显示用户名（`roberthmurillo`）而非显示名 | 优先取头像 `img.avatar-media` 的 alt 作显示名 |
-| 23 | 下载文件用 yt-dlp 默认标题/图片原始文件名 | 文件不叫作品名 | 用 `{作品标题}_{序号}.{ext}` 命名 |
-| 24 | 一个作品有多条视频时把全部（含 making-of/breakdown/showcase）都下载 | 下载大量衍生内容，成片淹没在几十个视频里 | 用 oEmbed 标题 + `classify()` 分 `main`/`breakdown`/`locked`/`other`；**只下载 `main` 成片，无成片才降级** |
-| 25 | 直接下载 Vimeo 密码锁定视频（oEmbed `title: null`） | yt-dlp 下载失败或需要密码 | 判定为 `locked` 跳过；作品页给密码时才用 `--video-password` 下载 |
+| 危险动作 | 正确做法 |
+|---------|---------|
+| 用 yt-dlp 下载 ArtStation | 用 gallery-dl |
+| 用 gallery-dl 下载 YouTube/Bilibili | 用 yt-dlp |
+| 不查 ffmpeg 就 `--download-sections` | 先 `command -v ffmpeg` |
+| 下载 Bilibili 不加 `--impersonate chrome` | 加 `--impersonate chrome` + `--add-header Origin/Referer`（防 412） |
+| 混用模板语法 `%(title)s` vs `{title}` | yt-dlp 用 `%(var)s`，gallery-dl 用 `{var}` |
+| 用 `--cookies-from-browser`/解密脚本取 cookies | 优先浏览器登录态（browser-harness CDP 直取），否则 Get cookies.txt LOCALLY 导出 |
+| 用 yt-dlp 下载小红书 / XHS-Downloader 下视频站 | 小红书用 XHS-Downloader，视频站用 yt-dlp |
+| 用 yt-dlp 下载抖音（期望无水印） | 用 parse-video-py 拿无水印直链 |
+| 不启动 parse-video-py/XHS 服务就调 API | 先启动服务（见各平台章节） |
+| 旧代码不更新 | 定期 `git pull` / `-U`（见工具自动更新） |
+| therookies 用 curl 抓 entry 页 | entry 页必须 browser-harness（真实浏览器过 CF）；results 页可 curl |
+| therookies 逐个导航几十作品页并各返回大 JSON | results 页 curl 出全部链接；entry 页逐个解析、每次只返回单作品 |
+| therookies 文件夹名把空格转 `-` 或抄 h3 标题 | parseEntry 干净 og:title（= h1）+ `sanitize_title`（保留空格，只替换 `/\:\|`） |
+| therookies 纯图下载保留 `1400xAUTO` | 替换 `/3840xAUTO/` 拿原图 |
+| Vimeo 无限重试 yt-dlp（被 Turnstile 401/403） | 检测到 401/403 直接转 JWT 方案（api.vimeo.com 拿签名 URL） |
+| therookies 只查 iframe、忽略 `<video>` / 正文链接 | 同时 `querySelectorAll(':scope video')` + `a[href*="/entries/"]` |
+| therookies 作者取单 by 用户名 | 取头像 `img.avatar-media` alt 作显示名 |
+| therookies 下所有视频（含衍生） | `classify()` 分 main/breakdown/locked，只下 `main` 成片 |
+| therookies 直接下密码锁定 Vimeo | 判 `locked` 跳过；页面有密码才 `--video-password` |
+| therookies 一律建 Video/Images 子目录 | 单类型直接放主目录；仅用户显式要求连图才分 Video/Images |
+| therookies 解析后不关闭临时标签页 | 快照 `list_tabs()` + 追踪 `new_tab()` targetId + 逐个 `close_tab(target=...)`，只清理本次打开的标签 |
+| browser-harness 连不上浏览器 / `page_info()` 报错 | 确认 CDP 端点（Dia 9222 纯 WS 用 `BU_CDP_WS`）；Chrome 引导开 `chrome://inspect/#remote-debugging` + 勾选 Allow |
 
 ## 🔧 失败模式与恢复
 
 | 触发条件 | 一线修复 | 仍失败兜底 |
 |---------|---------|-----------|
-| `yt-dlp` 返回 HTTP 403/412 | 加 `--impersonate chrome` 再试 | 加 `--add-header Origin` + `--add-header Referer`，仍失败则告知用户需在浏览器手动访问 |
-| `yt-dlp` 返回 HTTP 404（Bilibili） | 确认 BV 号是否正确，换一个可用视频测试 | 可能是区域限制，提示用户确认视频可访问 |
-| `command -v ffmpeg` 失败（时间切片需要） | 提示 `brew install ffmpeg` | 不用时间切片，引导用户下载完整视频后自行剪辑 |
-| `gallery-dl -K` 返回空/报错 | 确认 URL 是否为 ArtStation 项目/画师页格式 | 检查网络，提示用户在浏览器打开确认链接有效 |
-| `gallery-dl` 文件名包含非法字符 | gallery-dl 会自动替换，但如果报错改用 `-f "{hash_id}_{num}.{extension}"` | 用 `-f "{num}.{extension}"` 降级 |
-| `<cookies_dir>/<平台>.txt` 不存在 | 跳过 cookies，用公开画质下载 | 需高画质/登录内容时提示用户用 Get cookies.txt LOCALLY 导出上传 |
-| 格式列表 `-F` 无输出 | 检查 URL 是否可公开访问 | 提示用户确认链接，换 `-f "bv*+ba/b"` 无格式限制下载 |
-| 高画质格式被锁定（需登录） | 提示用户更新该平台 cookies 文件后重试 | 仍失败则提示确认账号是否购买了该内容/有相应权限，用公开可用画质下载 |
-| cookies 文件失效（下载报权限错误） | 引导用户重新用 Get cookies.txt LOCALLY 导出覆盖原文件 | 跳过 cookies 用公开画质下载 |
-| Bilibili 下载 AV1 格式（format ID 100xxx）连接超时（`Connection timed out`） | 换用 AVC/h264 格式（format ID 300xx） | 指定低分辨率格式如 720p 或换第三方工具 |
-| XHS-Downloader API 返回空/报错 | 检查 `/tmp/xhs-downloader` 是否最新，执行 `git pull` | 检查 Cookie 配置是否过期，必要时更新 Cookie |
-| parse-video-py 解析抖音失败 | 确认使用 App 分享链接而非网页版链接；重启服务后重试 | 切换为 yt-dlp 带水印的版本下载 |
-| parse-video-py 服务端口被占用 | `kill $(lsof -t -i:8000) 2>/dev/null` 后重启 | 修改端口号 `python main.py --port 8001` |
-| 小红书链接含 `xsec_token` 但解析失败 | 尝试使用 `xhslink.com` 短链接格式 | 在浏览器中打开后复制最新分享链接 |
-| 抖音图文/图集下载到的是图片而非视频 | 这是正常行为——抖音图文本来就只有图片 | 检查返回 JSON 的 `type` 字段确认内容类型 |
-| therookies 结果页 evaluate 提取不到 h3 | 页面结构可能已改，h3 含换行或改为其它标签 | 先 normalize 空白（`replace(/\s+/g,' ')`）再剥 `Finalists ` 前缀 |
-| therookies 作品页 fetch 返回空 | JS challenge 或网络波动 | 重试；或改为对该 entry 逐个导航抓取（BrowserClaw navigate + evaluate） |
-| therookies 图片 3840xAUTO 返回 400 | 该图原尺寸不足 3840，尺寸段已超出上限 | 换用更小的尺寸段（1400xAUTO）或保留原 URL |
-| therookies Vimeo 视频无法下载 | yt-dlp OAuth 401（未登录 web 客户端） | 用 `question` 要求用户更新 `cookies_dir/vimeo.txt` 后重试 |
-| therookies 纯图作品漏检原生 `<video>`（如 Character Dossier 的 S3 mp4） | parseEntry 只查 iframe，没查 `<video>`/`<source>` | 解析时同时 `querySelectorAll(':scope video')` 取 `currentSrc`/`src`，判为 `direct` 视频 |
-| therookies 作品作者显示为用户名（如 `roberthmurillo`）而非显示名 | og:title 单 by 时 by 后是用户名；显示名在头像 `img.avatar-media` 的 alt 里 | author 优先取 `.avatar-media` alt（"Roberth Alexander Murillo Lugo"），无头像时回退 og:title |
-| therookies 纯图作品页里其实有完整影片超链接（如 Allegaert "Click here" → 另一 `/entries/`） | 只查 iframe/video 忽略正文链接 | 检测 `.project-content` 内 `a[href*="/entries/"]`（排除自身 id）记为 `linkedEntries`，再 fetch 补全其视频 |
-| therookies 下载文件名不是作品名 | 用 yt-dlp 默认 `%(title)s` 或图片原始文件名 | 统一用 `{作品标题}_{序号}.{ext}` 命名，目录/文件非法字符替换为 `-` |
-| therookies oEmbed 拉标题失败（网络/超时） | 单条重试 oEmbed；仍失败则用 iframe 前 H3 章节标题兜底（"THE MOVIE"→main） | 整批降级为无标题模式（不分类，全部下载，由用户自己判断） |
-| therookies 成片标题不含作品名也不含特征词（classify 判为 `other`） | 对照 iframe 前 H3 章节标题补判：含 `movie`/`film`/`teaser` 的 H3 段落优先作 main | 按 `other` 处理放衍生列，呈现给用户时标注标题，由用户确认 |
-| therookies Vimeo 密码锁定视频（oEmbed `title: null`）被当成纯图/漏掉 | 判定为 `locked` 保留在衍生列标注"密码锁定"，下载阶段跳过 | 作品页正文有密码则 `--video-password` 下载，无则告知用户需浏览器手动访问 |
+| `yt-dlp` HTTP 403/412 | 加 `--impersonate chrome` | 加 `--add-header Origin/Referer`，仍失败让用户在浏览器手动访问 |
+| `yt-dlp` HTTP 404（Bilibili） | 确认 BV 号，换可用视频测试 | 可能是区域限制，提示确认视频可访问 |
+| `command -v ffmpeg` 失败 | `brew install ffmpeg` | 不时间切片，引导下完整视频自行剪辑 |
+| `gallery-dl -K` 空/报错 | 确认 URL 是否为项目/画师页格式 | 检查网络，提示浏览器打开确认链接 |
+| `<cookies_dir>/<平台>.txt` 不存在 | 跳过 cookies 用公开画质 | 需高画质/登录时引导从真实浏览器登录态直取（browser-harness CDP） |
+| 高画质被锁 / cookies 失效 | 提示更新 cookies 重试 | 确认账号有无权限，用公开画质 |
+| Bilibili AV1（100xxx）超时 | 换 AVC/h264（300xx） | 降分辨率或换工具 |
+| XHS-Downloader 空/报错 | `git pull` 更新 | 检查 Cookie 是否过期并更新 |
+| parse-video-py 解析失败 | 用 App 分享链接；重启服务 | 切 yt-dlp 带水印版本 |
+| parse-video-py 端口占用 | `kill $(lsof -t -i:8000)` 重启 | 改端口 `--port 8001` |
+| 小红书含 `xsec_token` 解析失败 | 用 `xhslink.com` 短链 | 浏览器打开复制最新分享链 |
+| therookies curl 提取不到 h3 | normalize 空白；`.cardProject` 容器 + `id="finalists"` 定位 | 页面结构已改则更新选择器 |
+| therookies `js()` 返回空 | Cloudflare 未过 → 确认连的是真实浏览器（非 headless），重试或等页面渲染完 | 引导用户浏览器登录后重试 |
+| therookies 图片 3840xAUTO 返回 400 | 原图实际分辨率不足 1400，回退到 1400xAUTO | 保留原有 1400xAUTO URL |
+| therookies 作者显示为用户名 | 取头像 `.avatar-media` alt | 无头像回退 og:title |
+| therookies 解析后浏览器残留大量空标签页 | 快照 `list_tabs()` 追踪 `new_tab()` targetId，结束后 `close_tab(target=...)` 逐条关闭 | 引导用户手动关闭空标签 |
+| therookies oEmbed 拉标题失败 | 单条重试；用 iframe 前 H3 标题兜底 | 整批无标题模式（不分类全下载） |
+| therookies Vimeo 401/403（Turnstile） | 转 JWT 方案（`scripts/vimeo_jwt_dl.py`） | 告知用户浏览器登录后提取 JWT |
+| browser-harness 未安装 | `uv tool install --python 3.12 --upgrade --force browser-harness` + `--doctor` | 检查 uv/网络；用 Get cookies.txt LOCALLY + curl 兜底 |
+| browser-harness 连不上 CDP（WS 握手失败） | 确认 Dia/Chrome 开了远程调试（9222）；Dia 用 `BU_CDP_WS`，Chrome 用 `BU_CDP_URL` | 引导用户开 `chrome://inspect/#remote-debugging` 勾选 Allow |
+| browser-harness `js()` 语法/返回错 | 表达式须为合法 JS；min.js 用无注释版 | 改用单条简单表达式排查 |
 
 ## 场景示例
 
 ```
 用户: "下载这个 https://youtu.be/xxx"
-→ 列出格式，max=1080p → 自动下载 1080p
-
+→ 列格式；max=1080p → 自动 1080p
 用户: "把这个下了 https://youtu.be/xxx 10:30-15:00"
-→ 检查 ffmpeg → 时间切片下载
-
+→ 查 ffmpeg → 时间切片
 用户: "ArtStation 这个项目 https://www.artstation.com/artwork/Ov6Zwb"
-→ gallery-dl → artstation/用户名/项目名_序号.扩展名
-
+→ gallery-dl → artstation/用户名/项目名_序号.ext
 用户: "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7"
-→ 读取 cookies_dir/bilibili.txt → 列出格式 → 若高画质锁定则提示更新 cookies 重试 → 用户确认后重试 → 若>1080p问清晰度 → 下载
-
+→ 读 cookies_dir/bilibili.txt → 列格式 → 高画质锁定则更新 cookies → >1080p 问清晰度 → 下载
 用户: "Vimeo 这个视频 https://vimeo.com/xxx"
-→ 列出格式 → 若>1080p问清晰度 → 下载（公开视频无需 cookies）
-
+→ 先试 yt-dlp；401/403（Turnstile）→ 浏览器取 JWT → vimeo_jwt_dl.py 下载
 用户: "帮我下载 https://twitter.com/xxx/status/xxx"
 → yt-dlp 通用下载
-
 用户: "下载这个小红书 https://www.xiaohongshu.com/explore/xxx"
-→ 检查 /tmp/xhs-downloader/main.py 是否存在 → 若不存在则克隆并安装依赖 → 从 config.json 读取 download_dir → 启动 API 服务（--work_path 指向 download_dir）→ 调用 POST /xhs/detail {url, download:true} → 保存到 {download_dir}/Download/
-
-用户: "小红书这个笔记 https://xhslink.com/xxx"
-→ XHS-Downloader API 模式 → 调用 POST /xhs/detail {url, download:true} → 返回作品信息 + 文件保存到 download_dir
-
+→ 检查/安装 XHS-Downloader → 读 download_dir → 启动 API（--work_path）→ POST /xhs/detail → 存 Download/
 用户: "下个抖音视频 https://v.douyin.com/xxx"
-→ 检查 /tmp/parse-video-py/main.py 是否存在 → 若不存在则克隆并安装依赖 → 从 config.json 读取 download_dir → 启动 HTTP 服务 → 调用 GET /video/share/url/parse?url=抖音链接 → 提取 video_url → curl/yt-dlp 下载到 download_dir
-
-用户: "抖音去水印 https://www.douyin.com/video/xxx"
-→ parse-video-py 解析 → 获取无水印直链 → 下载到 download_dir
-
+→ 检查/安装 parse-video-py → 启动 HTTP 服务 → GET /video/share/url/parse → 提取 video_url → curl/yt-dlp 下载
 用户: "下载 https://www.therookies.co/contests/549/results 全部作品"
-→ BrowserClaw 打开 results 页 → evaluate 提取比赛名 + entry 链接 → 批量 fetch + 解析每作品视频链接 → oEmbed 补标题 + classify 分 main/breakdown/locked → 对话中呈现 DIFF 表格（成片/衍生分列）交用户挑选 → 按所选作品建 {比赛名}/{作品名}/Video 目录 → **只下载成片，无成片才降级衍生**，locked 跳过 → YouTube 用 yt-dlp 下载、Vimeo 需登录
-
+→ curl results 页解析比赛名 + entry 链接 → 逐作品 browser-harness（真实浏览器）js() 解析 → oEmbed 补标题 + classify → DIFF 表格交用户挑 → 建 {比赛名}/{作品名} 目录（og:title + sanitize_title 命名）→ 只下成片，无成片才降级，locked 跳过 → YouTube 用 yt-dlp、Vimeo 用 yt-dlp/JWT、原生 video 与图片用 curl
 用户: "下载 https://www.therookies.co/entries/47874"
-→ BrowserClaw 打开 entry 页 → evaluate 解析 og:title + .project-content 内视频/图片 → oEmbed 补标题分类成片 → 对话呈现（成片/衍生/密码锁定） → 建 {作品标题} by {作者}/Video 或 Images → 只下载成片，无成片才降级
-
-用户: "这个作品只要成片，不要 breakdown"
-→ 每个作品只下载 `role === 'main'` 的视频；无成片的作品提示用户（衍生内容也一并列出供选择）
-
+→ browser-harness 打开 entry → js() 跑 og:title + .project-content 视频/图片 → oEmbed 分类 → 对话呈现 → 建 {作品标题} 目录 → 只下成片
 用户: "AZIMUTH 那个作品 Vimeo 有成片，28 个 YouTube 都是 making-of，只下成片"
-→ classify 会把 Vimeo 判为 main、28 个 YouTube 判为 breakdown → 只下载那条 Vimeo 成片
+→ classify 判 Vimeo 为 main、28 个 YouTube 为 breakdown → 只下那条 Vimeo 成片
 ```
-

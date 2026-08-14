@@ -7,7 +7,7 @@
   {
     "id": 2,
     "prompt": "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7",
-    "expected": "检测到 Bilibili → 读取 cookies_dir/bilibili.txt（无则提示用 Get cookies.txt LOCALLY 导出上传）→ --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 高画质锁定则提示更新 cookies 重试 → >1080p 问清晰度"
+    "expected": "检测到 Bilibili → 读取 cookies_dir/bilibili.txt（无则引导从浏览器登录态直取，见 Cookies 引导）→ --impersonate chrome --add-header Origin/Referer 下载 → 列出格式 → 高画质锁定则提示更新 cookies 重试 → >1080p 问清晰度"
   },
   {
     "id": 3,
@@ -26,12 +26,17 @@
   },
   {
     "id": 6,
-    "prompt": "下载 therookies 这个比赛的全部作品 https://www.therookies.co/contests/549/results",
-    "expected": "检测到 therookies.co/contests → 用 BrowserClaw 打开 results 页 → evaluate 提取比赛名（normalize 空白后剥 Finalists 前缀）+ 全部 entry 链接 → 页内批量 fetch 每个 entry HTML → parseEntry 解析每作品的 youtube/vimeo/direct 视频链接（无视频的作品提取 cloudfront 图片 URL，尺寸段替换为 3840xAUTO）→ oEmbedTitle 补每条视频真实标题、classify 分类 main/breakdown/locked/other → 对话中呈现 DIFF 表格（成片/衍生分列、纯图片列图片数）交用户挑选 → 按所选作品建 {比赛名}/{作品名 by 作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp -S res:1080、Vimeo 需登录未登录则提示登录、纯图片用 curl 下载 3840xAUTO 原图"
+    "prompt": "Vimeo 这个视频 https://vimeo.com/1199171757",
+    "expected": "检测到 Vimeo → 先试 yt-dlp（公开可过）；401/403（Turnstile 挡）→ 立即转 JWT 方案不无限重试 → browser-harness js() 提取 __NEXT_DATA__.props.pageProps.viewerBootstrap.jwt → python3 scripts/vimeo_jwt_dl.py --video --jwt -o 下载 → ≤1080p 自动，>1080p 问清晰度"
   },
   {
     "id": 7,
+    "prompt": "下载 therookies 这个比赛的全部作品 https://www.therookies.co/contests/549/results",
+    "expected": "检测到 therookies.co/contests → curl 直连 results 页解析比赛名 + 全部 entry 链接 → 逐作品用 browser-harness 打开 entry 页 js() 解析每作品的 youtube/vimeo/direct 视频链接 + 全部 cloudfront 图片 URL（尺寸段替换为 3840xAUTO）→ oEmbedTitle 补每条视频真实标题、classify 分类 main/breakdown/locked/other → 对话中呈现 DIFF 表格（成片/衍生分列、图片列展示附带图数）交用户挑选 → 按所选作品建 {比赛名}/{作品名} 目录（用 parseEntry 干净 og:title + sanitize_title 命名，有视频只下视频不下图直接放主目录，纯图片作品才下图片；用户要求连图时才分 Video/Images）→ 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp -S res:1080、Vimeo 先试 yt-dlp 被 Turnstile 挡则 JWT 方案、图片用 curl 下载 3840xAUTO 原图"
+  },
+  {
+    "id": 8,
     "prompt": "下载 therookies 这个作品 https://www.therookies.co/entries/47874",
-    "expected": "检测到 therookies.co/entries（单作品）→ 用 BrowserClaw 打开 entry 页 → 页内 evaluate 解析当前 document：og:title 取标题/作者、.project-content 内 iframe + 原生 video 取视频清单（youtube/vimeo/direct）、仅当无视频时取 img 提取 cloudfront 图片 URL 并替换 3840xAUTO → oEmbedTitle 补标题 + classify 分 main/breakdown/locked → 对话呈现资源（成片/衍生分列、纯图列图片数）→ 建 {作品标题} by {作者}/Video 或 Images 目录 → 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp、Vimeo 需登录、纯图片用 curl 3840xAUTO"
+    "expected": "检测到 therookies.co/entries（单作品）→ 用 browser-harness 打开 entry 页 → 页内 js() 解析当前 document：og:title 取标题/作者、.project-content 内 iframe + 原生 video 取视频清单（youtube/vimeo/direct）、同时取 img 提取全部 cloudfront 图片 URL 并替换 3840xAUTO → oEmbedTitle 补标题 + classify 分 main/breakdown/locked → 对话呈现资源（成片/衍生分列、图片列展示附带图数）→ 建 {作品标题} 目录（用 parseEntry 干净 og:title + sanitize_title 命名，有视频只下视频不下图直接放主目录，纯图片作品才下图片）→ 只下载成片（无成片才降级衍生、locked 跳过）→ YouTube 用 yt-dlp、Vimeo 先试 yt-dlp 被 Turnstile 挡则 JWT、图片用 curl 3840xAUTO"
   }
 ]
