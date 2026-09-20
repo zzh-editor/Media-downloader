@@ -6,8 +6,10 @@ description: >
     用户给出视频/图片链接请求下载时必须使用，包括"下载这个视频/把这个下了/帮我下这个/下载链接/保存这个视频/
     下载 B 站/下这个 youtube/ArtStation 下载/把这个项目下了/下个视频/帮我下个东西/下这个小红书/小红书这个笔记/
     下个抖音/抖音去水印/下载 therookies 这个比赛"。技能自动处理清晰度选择（>1080p 询问）、时间切片下载、
-    ArtStation 按用户名/项目名组织、TheRookies 比赛按作品批量组织。gallery-dl 用于图片画廊站
-    （ArtStation、Pixiv、DeviantArt），XHS-Downloader 用于小红书，parse-video-py 用于抖音等无水印视频。
+    ArtStation 按用户名/项目名组织、TheRookies 比赛按作品批量组织。
+    依赖自动更新（每 7 天检查 yt-dlp/gallery-dl，下载失败时即时更新）。
+    下载后 webm 自动转 mp4（兼容剪辑软件）。默认 1080p，更高分辨率弹窗询问。
+    gallery-dl 用于图片画廊站（ArtStation、Pixiv、DeviantArt），XHS-Downloader 用于小红书，parse-video-py 用于抖音等无水印视频。
     therookies 结果页用 curl 直连，作品页/被 Cloudflare 拦截的页面用 browser-harness 直连用户真实浏览器
     解析（自带登录态，天然过 Cloudflare）；YouTube/Vimeo 视频走 yt-dlp（Vimeo 被 Turnstile 挡住时用 JWT 方案绕开），
     图片与内嵌视频用 curl/浏览器解析。cookies 优先从真实浏览器登录态直取（browser-harness CDP 导出转 Netscape），
@@ -131,22 +133,49 @@ sudo apt install yt-dlp ffmpeg && pipx install gallery-dl   # 或按发行版包
 
 ### 工具自动更新
 
-yt-dlp/gallery-dl 需频繁更新以对抗反爬。**按天间隔检查**（`config.json` 的 `last_update_check` + `update_interval_days`，默认 7）：
+yt-dlp/gallery-dl 需频繁更新以对抗反爬。**每次下载会话开始时必须检查**，不跳过：
 
-```
-if 距 last_update_check 超过 update_interval_days 天:
-    执行一次自动更新并更新 last_update_check
-else: 跳过（零开销）
-```
+#### 执行逻辑（每次下载前强制运行）
 
-```bash
-yt-dlp -U && gallery-dl --update          # brew 安装报"包管理器管理"则改用 brew upgrade yt-dlp gallery-dl
-cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt
-cd /tmp/parse-video-py && git pull && pip install -r requirements.txt
-```
+1. 读 `config.json` 的 `last_update_check` 和 `update_interval_days`（默认 7）
+2. 计算距今天数：`delta = today - last_update_check`
+3. **delta >= update_interval_days → 执行更新**：
 
-- **更新失败静默降级**：自动更新失败不阻断下载，用现有版本继续，等下次间隔再试
-- 例外：下载报"版本过旧/请更新"时无视间隔立即更新
+   **macOS：**
+   ```bash
+   brew upgrade yt-dlp gallery-dl 2>/dev/null || true
+   pip3 install -U --break-system-packages yt-dlp 2>/dev/null || true
+   cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt 2>/dev/null || true
+   cd /tmp/parse-video-py && git pull && pip install -r requirements.txt 2>/dev/null || true
+   ```
+
+   **Windows（PowerShell）：**
+   ```powershell
+   winget upgrade yt-dlp.yt-dlp Gyan.FFmpeg 2>$null
+   pip install -U yt-dlp gallery-dl 2>$null
+   cd C:\tmp\xhs-downloader; git pull; pip install -r requirements.txt 2>$null
+   cd C:\tmp\parse-video-py; git pull; pip install -r requirements.txt 2>$null
+   ```
+
+   **Linux：**
+   ```bash
+   sudo apt update && sudo apt install -y yt-dlp 2>/dev/null || pip3 install -U --break-system-packages yt-dlp 2>/dev/null || true
+   pip3 install -U --break-system-packages gallery-dl 2>/dev/null || true
+   cd /tmp/xhs-downloader && git pull && pip install -r requirements.txt 2>/dev/null || true
+   cd /tmp/parse-video-py && git pull && pip install -r requirements.txt 2>/dev/null || true
+   ```
+
+   更新后写回 `last_update_check` 为今天日期（ISO 格式）
+4. **delta < update_interval_days → 跳过**（零开销）
+
+#### 下载失败触发更新
+
+以下错误出现时**无视间隔立即更新**对应工具，更新后重试下载（最多 1 次）：
+- yt-dlp 报 "Please update" / "版本过旧" / HTTP 403（非登录问题）/ 412
+- gallery-dl 报版本相关错误
+- 任何 extractor 返回 "unsupported" / "not implemented"
+
+更新失败则静默降级，用现有版本继续，不阻断下载。
 
 ### XHS-Downloader（小红书必需）
 
@@ -221,6 +250,38 @@ yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"   # 验证
 ## 执行规范
 
 下载命令优先用 `bash_stream`（流式进度，参数同 `bash`）；无此工具用 `bash` 兜底。
+
+## 下载后处理：webm → mp4 自动转换
+
+🔴 **CHECKPOINT · 🛑 STOP：每次下载视频完成后必须检查文件格式。**
+
+yt-dlp 在 YouTube 等平台默认优先下载 webm（VP9/AV1 编码），但多数剪辑软件（Premiere、DaVinci Resolve、Final Cut Pro）和系统播放器不支持 webm。**下载完成后若输出为 .webm，自动用 ffmpeg 转为 mp4**：
+
+```bash
+# 检测刚下载的文件是否为 webm
+DOWNLOADED_FILE="<刚下载的文件路径>"
+if [[ "$DOWNLOADED_FILE" == *.webm ]]; then
+    MP4_FILE="${DOWNLOADED_FILE%.webm}.mp4"
+    ffmpeg -i "$DOWNLOADED_FILE" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 192k "$MP4_FILE" -y 2>&1
+    # 转换成功则删除 webm 原文件
+    if [ $? -eq 0 ]; then
+        rm -f "$DOWNLOADED_FILE"
+        echo "已转换: $MP4_FILE"
+    else
+        echo "转换失败，保留 webm 原文件: $DOWNLOADED_FILE"
+    fi
+fi
+```
+
+**参数说明**：
+- `-c:v libx264 -crf 18`：H.264 编码，质量因子 18（视觉无损，文件略大于 webm 但兼容性最佳）
+- `-preset medium`：编码速度与文件大小平衡
+- `-c:a aac -b:a 192k`：AAC 音频，192kbps（剪辑标准）
+- `-y`：覆盖已存在的 mp4
+
+**时间切片场景**：切片下载的 `.webm` 同样触发转换，转换后删除 webm。
+
+**已知例外**：若用户明确要求保留 webm（如用于 Web 嵌入），跳过转换。Vimeo JWT 方案直接输出 mp4，无需转换。
 
 ## 浏览器访问约定
 
@@ -696,14 +757,18 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 
 ## 清晰度选择策略
 
-🔴 **CHECKPOINT**：格式中有 >1080p 选项时必须询问用户。
+🔴 **CHECKPOINT · 🛑 STOP：每次下载视频前必须执行此检查，不可跳过。**
 
 1. `yt-dlp -F "<URL>"` 提取所有视频格式的**高度值**（resolution/height 列）
 2. 筛选 >= 1080p 的选项，去重升序
-3. 决策：最大高度 <= 1080 → 自动 `-S "res:1080"`；> 1080 → `question` 列出 >= 1080p 选项让用户选
-4. 选 1080p → `res:1080`；4K/2160p → `res:2160`；8K/4320p → `res:4320`；具体值 → `res:<HEIGHT>`
+3. **决策**：
+   - 最大高度 <= 1080 → 自动 `-S "res:1080"`，无需询问
+   - **最大高度 > 1080 → 必须用 `question` 弹窗询问用户**，列出 >= 1080p 的所有选项（如 1080p / 1440p / 2160p），让用户选择
+4. 选 1080p → `res:1080`；1440p → `res:1440`；4K/2160p → `res:2160`；8K/4320p → `res:4320`；具体值 → `res:<HEIGHT>`
 
 `-S "res:X"` 含义：限制分辨率不超过 X，优先接近 X 的最佳格式。
+
+**反模式**：不得在有 >1080p 选项时默认下载 1080p 而不询问用户。用户明确指定分辨率时可跳过询问。
 
 ## 通用参数参考
 
@@ -743,7 +808,8 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | 用 yt-dlp 下载小红书 / XHS-Downloader 下视频站 | 小红书用 XHS-Downloader，视频站用 yt-dlp |
 | 用 yt-dlp 下载抖音（期望无水印） | 用 parse-video-py 拿无水印直链 |
 | 不启动 parse-video-py/XHS 服务就调 API | 先启动服务（见各平台章节） |
-| 旧代码不更新 | 定期 `git pull` / `-U`（见工具自动更新） |
+| 旧代码不更新 | 每次下载会话开始时检查更新（见工具自动更新） |
+| 下载 webm 不转 mp4 | 下载后检测 .webm 自动 ffmpeg 转 .mp4（见下载后处理） |
 | therookies 用 curl 抓 entry 页 | entry 页必须 browser-harness（真实浏览器过 CF）；results 页可 curl |
 | therookies 逐个导航几十作品页并各返回大 JSON | results 页 curl 出全部链接；entry 页逐个解析、每次只返回单作品 |
 | therookies 文件夹名把空格转 `-` 或抄 h3 标题 | parseEntry 干净 og:title（= h1）+ `sanitize_title`（保留空格，只替换 `/\:\|`） |
@@ -782,6 +848,7 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | browser-harness 未安装 | `uv tool install --python 3.12 --upgrade --force browser-harness` + `--doctor` | 检查 uv/网络；用 Get cookies.txt LOCALLY + curl 兜底 |
 | browser-harness 连不上 CDP（WS 握手失败） | 确认 Dia/Chrome 开了远程调试（9222）；Dia 用 `BU_CDP_WS`，Chrome 用 `BU_CDP_URL` | 引导用户开 `chrome://inspect/#remote-debugging` 勾选 Allow |
 | browser-harness `js()` 语法/返回错 | 表达式须为合法 JS；min.js 用无注释版 | 改用单条简单表达式排查 |
+| ffmpeg webm→mp4 转换失败 | 检查 ffmpeg 是否安装（`brew install ffmpeg`）；尝试只转视频流 `-vn` | 保留 webm 原文件，提示用户手动转换 |
 
 ## 场景示例
 
