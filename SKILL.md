@@ -168,6 +168,10 @@ yt-dlp/gallery-dl 需频繁更新以对抗反爬。**每次下载会话开始时
    更新后写回 `last_update_check` 为今天日期（ISO 格式）
 4. **delta < update_interval_days → 跳过**（零开销）
 
+> YouTube 场景更新 yt-dlp 时用 nightly 而非 stable：`pip install -U --pre "yt-dlp[default]"`。stable 版落后两周以上就常出现 `age-restricted` / `The page needs to be reloaded`（反爬变更，非 cookies 问题）。
+>
+> 升级 `bgutil-ytdlp-pot-provider` 插件后，provider 源码必须同步换到相同版本号的 tag 并重编译（`cd ~/bgutil-ytdlp-pot-provider && git fetch --tags && git checkout <版本号> && cd server && npm ci && npx tsc`），版本不一致会出现 token 生成失败。
+
 #### 下载失败触发更新
 
 以下错误出现时**无视间隔立即更新**对应工具，更新后重试下载（最多 1 次）：
@@ -207,6 +211,12 @@ python -c "import httpx, fastapi" && echo "OK"   # 验证
 pip3 install --break-system-packages curl_cffi          # macOS；Windows 用 pip install curl_cffi
 yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"   # 验证
 ```
+
+### PO Token provider（YouTube 高清必需）
+
+🔴 **CHECKPOINT**：缺 PO Token 时 `-F` 只会剩 360p 和 18 号 mp4，看起来像"视频最高只有 360p"。
+
+安装、验证、Windows 15 秒超时的预热办法、HTTP server 模式、兜底 client：见 `references/youtube.md` 第一节。
 
 ## Cookies 获取引导
 
@@ -251,37 +261,11 @@ yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"   # 验证
 
 下载命令优先用 `bash_stream`（流式进度，参数同 `bash`）；无此工具用 `bash` 兜底。
 
-## 下载后处理：webm → mp4 自动转换
+## 下载后处理：webm 容器处理
 
 🔴 **CHECKPOINT · 🛑 STOP：每次下载视频完成后必须检查文件格式。**
 
-yt-dlp 在 YouTube 等平台默认优先下载 webm（VP9/AV1 编码），但多数剪辑软件（Premiere、DaVinci Resolve、Final Cut Pro）和系统播放器不支持 webm。**下载完成后若输出为 .webm，自动用 ffmpeg 转为 mp4**：
-
-```bash
-# 检测刚下载的文件是否为 webm
-DOWNLOADED_FILE="<刚下载的文件路径>"
-if [[ "$DOWNLOADED_FILE" == *.webm ]]; then
-    MP4_FILE="${DOWNLOADED_FILE%.webm}.mp4"
-    ffmpeg -i "$DOWNLOADED_FILE" -c:v libx264 -crf 18 -preset medium -c:a aac -b:a 192k "$MP4_FILE" -y 2>&1
-    # 转换成功则删除 webm 原文件
-    if [ $? -eq 0 ]; then
-        rm -f "$DOWNLOADED_FILE"
-        echo "已转换: $MP4_FILE"
-    else
-        echo "转换失败，保留 webm 原文件: $DOWNLOADED_FILE"
-    fi
-fi
-```
-
-**参数说明**：
-- `-c:v libx264 -crf 18`：H.264 编码，质量因子 18（视觉无损，文件略大于 webm 但兼容性最佳）
-- `-preset medium`：编码速度与文件大小平衡
-- `-c:a aac -b:a 192k`：AAC 音频，192kbps（剪辑标准）
-- `-y`：覆盖已存在的 mp4
-
-**时间切片场景**：切片下载的 `.webm` 同样触发转换，转换后删除 webm。
-
-**已知例外**：若用户明确要求保留 webm（如用于 Web 嵌入），跳过转换。Vimeo JWT 方案直接输出 mp4，无需转换。
+`.webm` 默认先无损转封装成 MP4（`-c copy`，秒级、体积不变），老软件打不开才重编码 H.264。命令与参数：见 `references/youtube.md` 第三节。
 
 ## 浏览器访问约定
 
@@ -399,11 +383,9 @@ AV1 格式（ID 100xxx）可能连接超时，换 AVC/h264（300xx）或降分�
 
 ## YouTube 专用处理
 
-1. 公开视频无需 cookies；仅年龄限制/已购内容需读 `<cookies_dir>/youtube.txt`
-2. `yt-dlp -F "<URL>"` 列格式；>1080p 选项按清晰度策略询问
-3. `yt-dlp -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"`
-4. 需 cookies 时加 `--cookies <cookies_dir>/youtube.txt`
-5. 403 时加 `--impersonate chrome --cookies <cookies_dir>/youtube.txt`（实测能解决）
+🔴 **CHECKPOINT**：先确认 PO Token provider 就绪（见 `references/youtube.md` 第一节）。没就绪时 `-F` 只会给出 360p/720p，会把 4K 视频误判成"最高画质就这些"。
+
+yt-dlp 版本要求、cookies 判定、下载命令（`-f "bv*+ba/b"` 自动取最高档）、403 处理、AV1 `.webm` 后处理：见 `references/youtube.md` 第二、三节。
 
 ## Vimeo 专用处理
 
@@ -809,7 +791,8 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | 用 yt-dlp 下载抖音（期望无水印） | 用 parse-video-py 拿无水印直链 |
 | 不启动 parse-video-py/XHS 服务就调 API | 先启动服务（见各平台章节） |
 | 旧代码不更新 | 每次下载会话开始时检查更新（见工具自动更新） |
-| 下载 webm 不转 mp4 | 下载后检测 .webm 自动 ffmpeg 转 .mp4（见下载后处理） |
+| 下载 webm 不处理就交付 | 先检测格式：AV1 webm 用 `-c copy` 直封 MP4（无损秒级）；确需 H.264 才重编码（见下载后处理） |
+| YouTube `-F` 只列 360p/18 号 mp4 就直接下载 | 缺 GVS PO Token 会静默跳过 1080p 以上格式，先装 PO Token provider（`references/youtube.md` 第一节）；`player_client=web_safari` 仅兜底（上限 1080p） |
 | therookies 用 curl 抓 entry 页 | entry 页必须 browser-harness（真实浏览器过 CF）；results 页可 curl |
 | therookies 逐个导航几十作品页并各返回大 JSON | results 页 curl 出全部链接；entry 页逐个解析、每次只返回单作品 |
 | therookies 文件夹名把空格转 `-` 或抄 h3 标题 | parseEntry 干净 og:title（= h1）+ `sanitize_title`（保留空格，只替换 `/\:\|`） |
@@ -828,6 +811,9 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | 触发条件 | 一线修复 | 仍失败兜底 |
 |---------|---------|-----------|
 | `yt-dlp` HTTP 403/412 | 加 `--impersonate chrome` | 加 `--add-header Origin/Referer`，仍失败让用户在浏览器手动访问 |
+| YouTube `-F` 只有 360p，视频实有 1080p/4K | 装 PO Token provider（见 `references/youtube.md` 第一节） | 临时 `--extractor-args "youtube:player_client=web_safari"`，上限 1080p HLS |
+| YouTube 报 `age-restricted` / `The page needs to be reloaded` | 升 nightly：`pip install -U --pre "yt-dlp[default]"`（反爬问题，非 cookies 问题） | 加 `--cookies` 后仍失败，确认账号对该内容有访问权限 |
+| Windows 下 provider 报 `generate_once.js ... timed out after 15.0 seconds` | 手动先跑一次 `node build/generate_once.js --version` 预热（冷启动约 21s，第二次约 2s） | 改用 HTTP server 模式 `node build/main.js`，免每次 spawn |
 | `yt-dlp` HTTP 404（Bilibili） | 确认 BV 号，换可用视频测试 | 可能是区域限制，提示确认视频可访问 |
 | `command -v ffmpeg` 失败 | `brew install ffmpeg` | 不时间切片，引导下完整视频自行剪辑 |
 | `gallery-dl -K` 空/报错 | 确认 URL 是否为项目/画师页格式 | 检查网络，提示浏览器打开确认链接 |
