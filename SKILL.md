@@ -11,7 +11,7 @@ description: >
     下载后 webm 自动转 mp4（兼容剪辑软件）。默认 1080p，更高分辨率弹窗询问。
     gallery-dl 用于图片画廊站（ArtStation、Pixiv、DeviantArt），XHS-Downloader 用于小红书，parse-video-py 用于抖音等无水印视频。
     therookies 结果页用 curl 直连，作品页/被 Cloudflare 拦截的页面用 browser-harness 直连用户真实浏览器
-    解析（自带登录态，天然过 Cloudflare）；YouTube/Vimeo 视频走 yt-dlp（Vimeo 被 Turnstile 挡住时用 JWT 方案绕开），
+    解析（自带登录态，天然过 Cloudflare）；YouTube 视频走 yt-dlp，Vimeo 走 scripts/vimeo_page_dl.py（浏览器抓签名 playlist，绕开 Turnstile），
     图片与内嵌视频用 curl/浏览器解析。cookies 优先从真实浏览器登录态直取（browser-harness CDP 导出转 Netscape），
     Get cookies.txt LOCALLY 扩展仅作兜底。任何时候用户提供 URL 并涉及下载行为，优先考虑此技能。
 ---
@@ -267,6 +267,8 @@ yt-dlp --list-impersonate-targets 2>&1 | grep -q chrome && echo "OK"   # 验证
 
 `.webm` 默认先无损转封装成 MP4（`-c copy`，秒级、体积不变），老软件打不开才重编码 H.264。命令与参数：见 `references/youtube.md` 第三节。
 
+**音视频时长校验**：HLS/m3u8 源（Vimeo、部分 YouTube）分片失败时 yt-dlp 只打印 `Skipping fragment N` 但仍返回 0，会产出音频短一截的坏文件。下载后跑一次 `ffprobe -show_entries format=duration:stream=codec_type,duration`，音频流时长与容器时长差 >1s 就是坏文件，重下。
+
 ## 浏览器访问约定
 
 浏览器类操作（爬取、登录引导、验证）统一用 **browser-harness**（直连用户真实浏览器），按优先级降级：
@@ -347,7 +349,7 @@ URL 后跟时间范围（空格分隔）则切片下载：`URL 10:30-15:00`（�
 - `artstation.com/.cn` → gallery-dl
 - `bilibili.com`/`b23.tv` → yt-dlp（Bilibili 专用）
 - `youtube.com`/`youtu.be`/`m.youtube.com` → yt-dlp
-- `vimeo.com` → yt-dlp（Vimeo 专用，被 Turnstile 挡时用 JWT 方案）
+- `vimeo.com` → `scripts/vimeo_page_dl.py`（Vimeo 专用，浏览器抓签名 playlist）
 - `xiaohongshu.com`/`xhslink.com`/`rednote.com` → XHS-Downloader
 - `douyin.com`/`v.douyin.com` → parse-video-py
 - `therookies.co/contests`/`therookies.co/entries` → TheRookies 专用流程
@@ -389,37 +391,41 @@ yt-dlp 版本要求、cookies 判定、下载命令（`-f "bv*+ba/b"` 自动取�
 
 ## Vimeo 专用处理
 
-🔴 **CHECKPOINT**：Vimeo 网页版被 Cloudflare Turnstile 人机验证挡住 player.vimeo.com，**yt-dlp/curl 直接访问全被 401/403**（`Unable to download webpage: HTTP Error 401`），`--impersonate chrome --cookies` 无效（Turnstile 是 CF 层，非登录问题）。**不要无限重试 yt-dlp**，检测到 401/403 直接转 JWT 方案。
-
-**方案一：JWT 方案（被 Turnstile 挡时主用，泛平台）**
-登录用户的 Vimeo 视频页内嵌 `__NEXT_DATA__` 里有 `viewerBootstrap.jwt`（网页登录 token，约 1 小时有效）。用它对 `api.vimeo.com`（不走 Turnstile）拿签名文件 URL 下载：
+🔴 **CHECKPOINT**：player.vimeo.com 被 Cloudflare Turnstile 挡住，yt-dlp/curl 直接访问全被 401（`--impersonate chrome --cookies` 无效，Turnstile 是 CF 层不是登录问题）。**默认一条命令走浏览器方案，不要手工拼 CDP 步骤**：
 
 ```bash
-# 1. 浏览器打开视频页提取 JWT（browser-harness 直连用户真实浏览器，自带登录态）：
-#    BU_CDP_WS="ws://127.0.0.1:9222/devtools/browser" browser-harness <<'PY'
-#    new_tab("https://vimeo.com/<id>")
-#    wait_for_load()
-#    jwt = js("JSON.parse(document.getElementById('__NEXT_DATA__').textContent).props.pageProps.viewerBootstrap.jwt")
-#    print(jwt)
-#    PY
-#    # 或把页面 HTML 存文件用脚本提取：--html
+python3 scripts/vimeo_page_dl.py --url "https://vimeo.com/<ID>" -o "<输出.mp4>"
+python3 scripts/vimeo_page_dl.py --url "<URL>" --list          # 列清晰度
+python3 scripts/vimeo_page_dl.py --url "<URL>" -o out.mp4 --no-proxy   # 本机代理挡 CDN 时
+```
 
-# 2. 下载（选 ≤1080p；>1080p 按清晰度策略询问后改 --height）：
+脚本做的事：browser-harness 开一个临时标签页（用完 `close_tab` 关掉，不碰用户原有标签）→ CDP 抓播放器请求的签名 master playlist → yt-dlp 下载 → ffprobe 校验音视频时长。实测 9 秒拿到清晰度列表（旧流程手工 8 步 + 固定 `sleep 12`）。
+
+**关键事实**：
+
+- 公开可看但禁止下载的视频（`privacy.download: false`），`api.vimeo.com` 的 `files` / `play` 字段返回**空数组**，JWT 方案拿不到直链。**别先试 JWT**。
+- master playlist 带 `pr=` 参数，里面已列出全部档位（实测 240p/360p/720p/1080p）。不要再去手拼 `avf/<id>/media.m3u8`（单档、无清晰度信息）——那是播放器内部的分档 URL。
+- 签名 URL 约 1 小时过期，抓完立刻下。
+- 真实标题取 `__NEXT_DATA__` 的 `props.pageProps.clip.name`（页面 `<title>` 是 `<视频名> | Videos & Movies on Vimeo`）。
+
+**下载后校验（必做，脚本已内置）**：yt-dlp 遇到分片失败会打印 `Skipping fragment N` 但**仍然返回 0**，产出音频短一截的坏文件。脚本用 ffprobe 对比容器时长与音频流时长，差值 >1s 直接报错退出（exit 1），重跑即可（会重新取签名 URL）。
+
+**方案二：JWT（仅当 `privacy.download` 为 true：自己上传 / 团队视频）**
+
+登录用户页面 `__NEXT_DATA__` 里有 `viewerBootstrap.jwt`（约 1h 有效），对 api.vimeo.com（不走 Turnstile）拿签名文件 URL：
+
+```bash
 python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" -o "<输出.mp4>"
-python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" --list   # 列清晰度
+python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" --list
 ```
 
-- `scripts/vimeo_jwt_dl.py` 支持 `--jwt <token>` 或 `--html <页面HTML文件>` 自动提取
-- 实测：`Authorization: jwt <JWT>` 调 `api.vimeo.com/videos/{id}?fields=name,uri,privacy,files` 返回签名文件 URL（uhd/hd/sd 多档），curl 直接下载成功（1080p 40MB）
-- JWT 过期（约 1h）重新提取即可
-- **公开视频也可先试 yt-dlp**（部分视频 yt-dlp 能直接过，见方案二）；被 Turnstile 挡才转 JWT
-
-**方案二：yt-dlp（公开视频快速通道，未被 Turnstile 挡时）**
+**方案三：yt-dlp 直连（少数未启用 Turnstile 的视频）**
 
 ```bash
-yt-dlp --cookies <cookies_dir>/vimeo.txt --impersonate chrome --extractor-args "vimeo:client=web" -F "<URL>"   # 列格式
-yt-dlp --cookies <cookies_dir>/vimeo.txt --impersonate chrome --extractor-args "vimeo:client=web" -P "<DOWNLOAD_DIR>" -o "%(title)s.%(ext)s" -S "res:1080" "<URL>"
+yt-dlp --cookies <cookies_dir>/vimeo.txt --impersonate chrome -F "<URL>"
 ```
+
+报 401/403 或 `The web client only works when logged-in` → 直接回方案一。
 
 密码锁定的 Vimeo（oEmbed `title: null`）跳过，除非页面给了密码用 `--video-password "<密码>"`。
 
@@ -569,10 +575,9 @@ yt-dlp -P "<作品目录>/Video" -o "{作品标题}_01.%(ext)s" -S "res:1080" "<
 ```
 多条时序号递增（`_01`、`_02`…）（混合作品 `-P` 指向 `Video`，仅视频作品指向 `<作品目录>`）。
 
-**Vimeo**（优先 JWT 方案，被 Turnstile 挡时主用；未被挡可 yt-dlp；见 Vimeo 专用处理）：
+**Vimeo**（一律用 `scripts/vimeo_page_dl.py`，见 Vimeo 专用处理）：
 ```bash
-# 每条 Vimeo 视频先试 yt-dlp（公开可过），401/403 转 JWT：
-python3 scripts/vimeo_jwt_dl.py --video <ID> --jwt "$JWT" -o "<作品目录>/Video/{作品标题}_01.mp4"
+python3 scripts/vimeo_page_dl.py --url "https://vimeo.com/<ID>" -o "<作品目录>/Video/{作品标题}_01.mp4"
 ```
 密码锁定的 Vimeo（oEmbed `title: null`）不下载；页面给了密码用 `--video-password "<密码>"` 重试。
 
@@ -797,7 +802,9 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | therookies 逐个导航几十作品页并各返回大 JSON | results 页 curl 出全部链接；entry 页逐个解析、每次只返回单作品 |
 | therookies 文件夹名把空格转 `-` 或抄 h3 标题 | parseEntry 干净 og:title（= h1）+ `sanitize_title`（保留空格，只替换 `/\:\|`） |
 | therookies 纯图下载保留 `1400xAUTO` | 替换 `/3840xAUTO/` 拿原图 |
-| Vimeo 无限重试 yt-dlp（被 Turnstile 401/403） | 检测到 401/403 直接转 JWT 方案（api.vimeo.com 拿签名 URL） |
+| Vimeo 无限重试 yt-dlp（被 Turnstile 401/403） | 直接用 `scripts/vimeo_page_dl.py`（浏览器抓签名 master playlist） |
+| Vimeo 先试 JWT 拿到空 `files`/`play` | 公开但禁下载的视频 JWT 无解；直接走 vimeo_page_dl.py |
+| Vimeo 手工拼 `avf/<id>/media.m3u8` | 要 master playlist（带 `pr=`，含全部档位）才有清晰度可选 |
 | therookies 只查 iframe、忽略 `<video>` / 正文链接 | 同时 `querySelectorAll(':scope video')` + `a[href*="/entries/"]` |
 | therookies 作者取单 by 用户名 | 取头像 `img.avatar-media` alt 作显示名 |
 | therookies 下所有视频（含衍生） | `classify()` 分 main/breakdown/locked，只下 `main` 成片 |
@@ -811,6 +818,7 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | 触发条件 | 一线修复 | 仍失败兜底 |
 |---------|---------|-----------|
 | `yt-dlp` HTTP 403/412 | 加 `--impersonate chrome` | 加 `--add-header Origin/Referer`，仍失败让用户在浏览器手动访问 |
+| 下载完成但音频比视频短（`Skipping fragment N`） | 本机代理挡住 CDN：`env -u HTTPS_PROXY` 重跑，或脚本加 `--no-proxy` | 重取签名 URL 再下（Vimeo 用 vimeo_page_dl.py） |
 | YouTube `-F` 只有 360p，视频实有 1080p/4K | 装 PO Token provider（见 `references/youtube.md` 第一节） | 临时 `--extractor-args "youtube:player_client=web_safari"`，上限 1080p HLS |
 | YouTube 报 `age-restricted` / `The page needs to be reloaded` | 升 nightly：`pip install -U --pre "yt-dlp[default]"`（反爬问题，非 cookies 问题） | 加 `--cookies` 后仍失败，确认账号对该内容有访问权限 |
 | Windows 下 provider 报 `generate_once.js ... timed out after 15.0 seconds` | 手动先跑一次 `node build/generate_once.js --version` 预热（冷启动约 21s，第二次约 2s） | 改用 HTTP server 模式 `node build/main.js`，免每次 spawn |
@@ -830,7 +838,7 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 | therookies 作者显示为用户名 | 取头像 `.avatar-media` alt | 无头像回退 og:title |
 | therookies 解析后浏览器残留大量空标签页 | 快照 `list_tabs()` 追踪 `new_tab()` targetId，结束后 `close_tab(target=...)` 逐条关闭 | 引导用户手动关闭空标签 |
 | therookies oEmbed 拉标题失败 | 单条重试；用 iframe 前 H3 标题兜底 | 整批无标题模式（不分类全下载） |
-| therookies Vimeo 401/403（Turnstile） | 转 JWT 方案（`scripts/vimeo_jwt_dl.py`） | 告知用户浏览器登录后提取 JWT |
+| therookies Vimeo 401/403（Turnstile） | 改用 `scripts/vimeo_page_dl.py`（浏览器抓签名 playlist） | JWT 方案（`scripts/vimeo_jwt_dl.py`），再不行告知用户视频需登录/密码 |
 | browser-harness 未安装 | `uv tool install --python 3.12 --upgrade --force browser-harness` + `--doctor` | 检查 uv/网络；用 Get cookies.txt LOCALLY + curl 兜底 |
 | browser-harness 连不上 CDP（WS 握手失败） | 确认 Dia/Chrome 开了远程调试（9222）；Dia 用 `BU_CDP_WS`，Chrome 用 `BU_CDP_URL` | 引导用户开 `chrome://inspect/#remote-debugging` 勾选 Allow |
 | browser-harness `js()` 语法/返回错 | 表达式须为合法 JS；min.js 用无注释版 | 改用单条简单表达式排查 |
@@ -848,7 +856,7 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 用户: "下个B站视频 https://www.bilibili.com/video/BV1GJ411x7"
 → 读 cookies_dir/bilibili.txt → 列格式 → 高画质锁定则更新 cookies → >1080p 问清晰度 → 下载
 用户: "Vimeo 这个视频 https://vimeo.com/xxx"
-→ 先试 yt-dlp；401/403（Turnstile）→ 浏览器取 JWT → vimeo_jwt_dl.py 下载
+→ `python3 scripts/vimeo_page_dl.py --url <URL> -o <输出.mp4>`（取签名 URL、下载、校验一条命令）
 用户: "帮我下载 https://twitter.com/xxx/status/xxx"
 → yt-dlp 通用下载
 用户: "下载这个小红书 https://www.xiaohongshu.com/explore/xxx"
@@ -856,7 +864,7 @@ parse-video-py 同样支持小红书、快手、微博、B 站：`curl -s "http:
 用户: "下个抖音视频 https://v.douyin.com/xxx"
 → 检查/安装 parse-video-py → 启动 HTTP 服务 → GET /video/share/url/parse → 提取 video_url → curl/yt-dlp 下载
 用户: "下载 https://www.therookies.co/contests/549/results 全部作品"
-→ curl results 页解析比赛名 + entry 链接 → 逐作品 browser-harness（真实浏览器）js() 解析 → oEmbed 补标题 + classify → DIFF 表格交用户挑 → 建 {比赛名}/{作品名} 目录（og:title + sanitize_title 命名）→ 只下成片，无成片才降级，locked 跳过 → YouTube 用 yt-dlp、Vimeo 用 yt-dlp/JWT、原生 video 与图片用 curl
+→ curl results 页解析比赛名 + entry 链接 → 逐作品 browser-harness（真实浏览器）js() 解析 → oEmbed 补标题 + classify → DIFF 表格交用户挑 → 建 {比赛名}/{作品名} 目录（og:title + sanitize_title 命名）→ 只下成片，无成片才降级，locked 跳过 → YouTube 用 yt-dlp、Vimeo 用 vimeo_page_dl.py、原生 video 与图片用 curl
 用户: "下载 https://www.therookies.co/entries/47874"
 → browser-harness 打开 entry → js() 跑 og:title + .project-content 视频/图片 → oEmbed 分类 → 对话呈现 → 建 {作品标题} 目录 → 只下成片
 用户: "AZIMUTH 那个作品 Vimeo 有成片，28 个 YouTube 都是 making-of，只下成片"
